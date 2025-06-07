@@ -9,7 +9,7 @@ using namespace std;
 #define PAUSE 1
 #define EDIT 2
 #define CELL_SIZE 100
-
+#define COEFF_OF_RESTITUTION 1
 class Ball
 {
 
@@ -65,7 +65,7 @@ void resolveCollisionElastic(Ball* ballA,Ball* ballB){
 
     if (Vector2DotProduct(relative_velocity, normal) > 0) return;
     //correcting velocity using impulse
-    float impulse=-(1+1)*(normal.x*relative_velocity.x+normal.y*relative_velocity.y)*
+    float impulse=-(1+COEFF_OF_RESTITUTION)*(normal.x*relative_velocity.x+normal.y*relative_velocity.y)*
                         (balls[i]->mass*balls[j]->mass)/total_mass;
 
     balls[i]->velocity.x-=(impulse/balls[i]->mass)*normal.x;
@@ -79,8 +79,8 @@ void resolveCollisionElastic(Ball* ballA,Ball* ballB){
 
 void UpdateBalls(vector<Ball*>& balls,float dt){
     if(balls.empty()) return;
-vector<vector<vector<Ball*>>> GRID(100,vector<vector<Ball*>>(100,vector<Ball*>(0)));
-
+ vector<vector<vector<Ball*>>> GRID(100,vector<vector<Ball*>>(100,vector<Ball*>(0)));
+//ball to wall collision
     for(auto& b: balls){
         b->pos={
             .x=b->pos.x+b->velocity.x*dt,
@@ -88,45 +88,42 @@ vector<vector<vector<Ball*>>> GRID(100,vector<vector<Ball*>>(100,vector<Ball*>(0
         };
         
     }
-    for(auto& b: balls){
-        bool collisionX=false;
-        bool collisionY=false;
-        float prevx=b->pos.x-b->velocity.x*dt;
-        float prevy=b->pos.y-b->velocity.y*dt;
-        if(b->pos.x>=GetScreenWidth()-WALL_WIDTH-b->radius){
-            collisionX=true;
-            float t=(1/(prevx-b->pos.x))*(GetScreenWidth()-WALL_WIDTH-b->radius-b->pos.x);
-            b->pos.y=t*prevy+(1-t)*b->pos.y;
-            b->pos.x=GetScreenWidth()-WALL_WIDTH-b->radius;
-        }else if(b->pos.x<=WALL_WIDTH+b->radius){
-            collisionX=true;
-            float t=(1/(prevx-b->pos.x))*(WALL_WIDTH+b->radius-b->pos.x);
-            b->pos.y=t*prevy+(1-t)*b->pos.y;
-            b->pos.x=WALL_WIDTH+b->radius;
+        for(auto& b: balls){
+            bool collisionX=false;
+            bool collisionY=false;
+            float prevx=b->pos.x-b->velocity.x*dt;
+            float prevy=b->pos.y-b->velocity.y*dt;
+            if(b->pos.x>=GetScreenWidth()-WALL_WIDTH-b->radius){
+                collisionX=true;
+                float t=(1/(prevx-b->pos.x))*(GetScreenWidth()-WALL_WIDTH-b->radius-b->pos.x);
+                b->pos.y=t*prevy+(1-t)*b->pos.y;
+                b->pos.x=GetScreenWidth()-WALL_WIDTH-b->radius;
+            }else if(b->pos.x<=WALL_WIDTH+b->radius){
+                collisionX=true;
+                float t=(1/(prevx-b->pos.x))*(WALL_WIDTH+b->radius-b->pos.x);
+                b->pos.y=t*prevy+(1-t)*b->pos.y;
+                b->pos.x=WALL_WIDTH+b->radius;
+            }
+
+            if(b->pos.y>=GetScreenHeight()-WALL_HEIGHT-b->radius){
+                collisionY=true;
+                float t=(1/(prevy-b->pos.y))*(GetScreenHeight()-WALL_HEIGHT-b->radius-b->pos.y);
+                b->pos.x=t*prevx+(1-t)*b->pos.x;
+                b->pos.y=GetScreenHeight()-WALL_HEIGHT-b->radius;
+            }else if(b->pos.y<=WALL_HEIGHT+b->radius){
+                collisionY=true;
+                float t=(1/(prevy-b->pos.y))*(WALL_HEIGHT+b->radius-b->radius-b->pos.y);
+                b->pos.x=t*prevx+(1-t)*b->pos.x;
+                b->pos.y=WALL_HEIGHT+b->radius;
+            }
+
+            if(collisionX) b->velocity.x*=-1;
+            if(collisionY) b->velocity.y*=-1;
+           
+
+
+            GRID[min(99,max((int)b->pos.x/CELL_SIZE,0))][min(99,max(0,(int)b->pos.y/CELL_SIZE))].push_back(b);
         }
-
-        if(b->pos.y>=GetScreenHeight()-WALL_HEIGHT-b->radius){
-            collisionY=true;
-            float t=(1/(prevy-b->pos.y))*(GetScreenHeight()-WALL_HEIGHT-b->radius-b->pos.y);
-            b->pos.x=t*prevx+(1-t)*b->pos.x;
-            b->pos.y=GetScreenHeight()-WALL_HEIGHT-b->radius;
-        }else if(b->pos.y<=WALL_HEIGHT+b->radius){
-            collisionY=true;
-            float t=(1/(prevy-b->pos.y))*(WALL_HEIGHT+b->radius-b->radius-b->pos.y);
-            b->pos.x=t*prevx+(1-t)*b->pos.x;
-            b->pos.y=WALL_HEIGHT+b->radius;
-
-        
-        }
-
-        if(collisionX) b->velocity.x*=-1;
-        if(collisionY) b->velocity.y*=-1;
-        if(b->pos.x<5) b->pos.x=10
-        +b->radius;
-
-
-        GRID[min(99,max((int)b->pos.x/CELL_SIZE,0))][min(99,max(0,(int)b->pos.y/CELL_SIZE))].push_back(b);
-    }
     //ball to ball collision
     for(int i=0;i<GRID.size();i++){
         for(int j=0;j<GRID[i].size();j++){
@@ -166,12 +163,12 @@ vector<vector<vector<Ball*>>> GRID(100,vector<vector<Ball*>>(100,vector<Ball*>(0
         }
     }
 
-    //ball to wall collision
+
 
 
 
 }
-void RenderBalls(vector<Ball*> balls){
+void RenderBalls(vector<Ball*>& balls){
     for(auto& b: balls){
         DrawCircle(b->pos.x,b->pos.y,b->radius,b->color);
     }
@@ -180,11 +177,10 @@ void RenderBalls(vector<Ball*> balls){
 
 
 int main(){
-    int STATE=PLAY;
     int SCREEN_WIDTH=GetScreenWidth();
-    int SCREEN_HEIGHT=GetMonitorHeight(0);
+    int SCREEN_HEIGHT=GetScreenHeight();
 
-
+    SetConfigFlags(FLAG_WINDOW_RESIZABLE);
     InitWindow(SCREEN_WIDTH,SCREEN_HEIGHT,"Physics Engine");
     vector<Ball*> balls;
     for(int i=0;i<100;i++){
@@ -195,23 +191,18 @@ int main(){
 
  
     SetExitKey(KEY_Q);
-   //SetTargetFPS(60);
+    SetTargetFPS(60);
 
     while(!WindowShouldClose()){
         float dt=GetFrameTime();
 
-        BeginDrawing();
-
-        ClearBackground(WHITE);
-        DrawRectangle(WALL_WIDTH,WALL_HEIGHT,GetMonitorWidth(0)-2*WALL_WIDTH,GetMonitorHeight(0)-2*WALL_HEIGHT,BLACK);
-        DrawFPS(0,0);
-
         UpdateBalls(balls,dt);
 
+        BeginDrawing();
+        ClearBackground(WHITE);
+        DrawRectangle(WALL_WIDTH,WALL_HEIGHT,GetScreenWidth()-2*WALL_WIDTH,GetScreenWidth()-2*WALL_HEIGHT,BLACK);
+        DrawFPS(0,0);
         RenderBalls(balls);
-  
-
-
         EndDrawing();
 
 
