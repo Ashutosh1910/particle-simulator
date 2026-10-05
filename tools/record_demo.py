@@ -155,6 +155,7 @@ def main():
     d.seconds(5)
 
     scene("cloth")
+    tool("grab")
     d.caption("Ropes and cloth are distance constraints (position-based Verlet)")
     d.seconds(1.5)
     d.drag([(1060, 420), (1000, 560), (880, 700)], frames_per_leg=24, hold_end=20)
@@ -177,7 +178,7 @@ def main():
     d.click(*BTN_EDIT)
     tool("ball")
     d.click(slider_x(30, 2, 40), 333, glide_frames=14)  # spawn radius slider -> 30 px
-    d.drag([(520, 720), (260, 690)], frames_per_leg=30, hold_end=10)
+    d.drag([(240, 700), (560, 640)], frames_per_leg=30, hold_end=10)  # arrow = launch velocity
     d.click(*BTN_RUN)
     d.seconds(4)
 

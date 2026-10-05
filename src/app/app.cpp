@@ -303,6 +303,7 @@ void App::selectTool(Tool t) {
     if (isEditTool(t) && state_ != RunState::Editing) setState(RunState::Editing);
     if (!isEditTool(t) && state_ == RunState::Editing && t != Tool::Grab) setState(RunState::Running);
     tool_ = t;
+    toolBeforeGpu_ = Tool::Count;
 }
 
 void App::loadCurrentScene() {
@@ -322,7 +323,7 @@ void App::loadCurrentScene() {
     gpuDirty_ = true;
     std::string why;
     if (gpuActive_ && !gpuAllowed(&why)) {
-        gpuActive_ = false;
+        setGpuEnabled(false);
         toast("GPU compute switched off: " + why);
     }
     if (!toolAvailable(tool_, nullptr)) {
@@ -364,8 +365,16 @@ void App::setGpuEnabled(bool on) {
     world_.releaseGrab();
     movingParticle_ = movingBody_ = -1;
     dragging_ = false;
-    // keep the tool consistent with the state: edit tools only while editing
-    if (on && !toolAvailable(tool_, nullptr)) tool_ = state_ == RunState::Editing ? Tool::Ball : Tool::Attract;
+    // keep the tool consistent with the state: edit tools only while editing.
+    // Remember what the GPU displaced so switching back restores it.
+    if (on && !toolAvailable(tool_, nullptr)) {
+        toolBeforeGpu_ = tool_;
+        tool_ = state_ == RunState::Editing ? Tool::Ball : Tool::Attract;
+    } else if (!on && toolBeforeGpu_ != Tool::Count) {
+        if (toolAvailable(toolBeforeGpu_, nullptr) && isEditTool(toolBeforeGpu_) == (state_ == RunState::Editing))
+            tool_ = toolBeforeGpu_;
+        toolBeforeGpu_ = Tool::Count;
+    }
     toast(on ? "Physics now runs on the GPU" : "Physics back on the CPU");
 }
 

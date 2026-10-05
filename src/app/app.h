@@ -128,6 +128,7 @@ private:
 
     RunState state_ = RunState::Running;
     Tool tool_ = Tool::Grab;
+    Tool toolBeforeGpu_ = Tool::Count;  // tool replaced when GPU compute was switched on
     Tab tab_ = Tab::Physics;
     ColorMode colorMode_ = ColorMode::Base;
     bool showStructure_ = false;
