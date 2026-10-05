@@ -163,7 +163,7 @@ def main():
     d.caption("Turn on 'Tear links' and pull hard")
     d.click(*TEAR_CHECKBOX)
     d.seconds(0.5)
-    d.drag([(1000, 420), (1000, 560), (980, 860)], frames_per_leg=22, hold_end=30)
+    d.drag([(1000, 420), (1000, 600), (1150, 860)], frames_per_leg=16, hold_end=30)
     d.seconds(2.5)
 
     scene("soft")

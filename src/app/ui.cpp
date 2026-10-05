@@ -435,7 +435,7 @@ float App::drawPhysicsTab(float y) {
                 bool before = tear;
                 bool hasLinks = !world_.links.empty();
                 checkRow(y, "Tear links", &tear, hasLinks);
-                if (tear != before) P.tearRatio = tear ? 1.6f : 0;
+                if (tear != before) P.tearRatio = tear ? 1.25f : 0;
                 if (tear) {
                     if (!hasLinks) GuiDisable();
                     float ratio = P.tearRatio;
@@ -597,16 +597,17 @@ float App::drawPerformanceTab(float y) {
     const StepStats& s = world_.stats();
     const int n = world_.p.size();
 
+    // fixed-height row, so the controls below never move when the GPU is toggled
     text("Broad phase", panelX_, y + 5, 15, model == PhysicsModel::NBody || gpuActive_ ? kDim : kText);
     if (model == PhysicsModel::NBody) {
-        y = noteRow(y + 30, "Not used: gravity acts between all pairs. N-body uses Barnes-Hut (see Physics).", kDim);
+        text("not used (see Physics)", panelX_ + 128, y + 6, 14, kDim);
     } else if (gpuActive_) {
-        y = noteRow(y + 30, "The GPU uses its own uniform grid.", kDim);
+        text("GPU uses its own grid", panelX_ + 128, y + 6, 14, kDim);
     } else {
         broadphaseDropdownRect_ = {panelX_ + 128, y, panelW_ - 128, 28};
         broadphaseDropdownVisible_ = true;
-        y += 36;
     }
+    y += 36;
 
     int threads = world_.threads();
     int before = threads;
