@@ -18,9 +18,10 @@ protected:
     void findPairsImpl(ThreadPool& pool) override;
 
 private:
-    // cells of box min corners; clamped so neighbouring-cell arithmetic (c +/- 1) can't overflow
-    int cellCoord(double v) const { return (int)std::clamp(std::floor(v / cellSize_), -1.0e9, 1.0e9); }
-    int bucketOf(int cx, int cy) const;
+    // 64-bit cells of box min corners, so points far from the origin don't saturate;
+    // clamped so neighbouring-cell arithmetic (c +/- 1) can't overflow
+    long long cellCoord(double v) const { return (long long)std::clamp(std::floor(v / cellSize_), -4.0e18, 4.0e18); }
+    int bucketOf(long long cx, long long cy) const;
 
     double cellSize_ = 1;
     int tableSize_ = 1;

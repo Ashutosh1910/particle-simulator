@@ -18,8 +18,10 @@ protected:
 
 private:
     static constexpr int kLeafSize = 8;
-    // deep enough that one far outlier (1e9 px away) doesn't force the whole cloud into one leaf
-    static constexpr int kMaxDepth = 48;
+    // Nodes stop splitting once they are no wider than the widest box (smaller cells
+    // can't separate overlapping boxes anyway). The depth cap only guards against
+    // degenerate input: 2^-128 of even a 1e30-wide root is below any box size.
+    static constexpr int kMaxDepth = 128;
     struct Node {
         AABB box;
         int firstChild;  // -1 for leaves; children are firstChild..firstChild+3

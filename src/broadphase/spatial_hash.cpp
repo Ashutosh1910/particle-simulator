@@ -4,9 +4,10 @@
 #include <cmath>
 #include <unordered_set>
 
-int SpatialHash::bucketOf(int cx, int cy) const {
-    unsigned h = (unsigned)cx * 92837111u ^ (unsigned)cy * 689287499u;
-    return (int)(h % (unsigned)tableSize_);
+int SpatialHash::bucketOf(long long cx, long long cy) const {
+    unsigned long long h = (unsigned long long)cx * 92837111ull ^ (unsigned long long)cy * 689287499ull;
+    h ^= h >> 29;
+    return (int)(h % (unsigned long long)tableSize_);
 }
 
 void SpatialHash::buildImpl(ThreadPool& pool) {
@@ -29,7 +30,7 @@ void SpatialHash::findPairsImpl(ThreadPool& pool) {
         auto& out = out_[worker].pairs;
         long long tests = 0;
         for (int i = begin; i < end; i++) {
-            int cx = cellCoord(minX_[i]), cy = cellCoord(minY_[i]);
+            long long cx = cellCoord(minX_[i]), cy = cellCoord(minY_[i]);
             // the 9 neighbouring cells may hash to the same bucket: visit each bucket once
             int seen[9], nSeen = 0;
             for (int dy = -1; dy <= 1; dy++)
@@ -57,10 +58,10 @@ void SpatialHash::findPairsImpl(ThreadPool& pool) {
 void SpatialHash::queryImpl(const AABB& box, std::vector<int>& out) const {
     if (n_ == 0) return;
     // a box overlapping the query has its min corner in [query.min - maxWidth, query.max]
-    int x0 = cellCoord(std::max((double)box.minX, (double)bounds_.minX) - maxBoxWidth_);
-    int x1 = cellCoord(std::min(box.maxX, bounds_.maxX));
-    int y0 = cellCoord(std::max((double)box.minY, (double)bounds_.minY) - maxBoxWidth_);
-    int y1 = cellCoord(std::min(box.maxY, bounds_.maxY));
+    long long x0 = cellCoord(std::max((double)box.minX, (double)bounds_.minX) - maxBoxWidth_);
+    long long x1 = cellCoord((double)std::min(box.maxX, bounds_.maxX));
+    long long y0 = cellCoord(std::max((double)box.minY, (double)bounds_.minY) - maxBoxWidth_);
+    long long y1 = cellCoord((double)std::min(box.maxY, bounds_.maxY));
     if (x1 < x0 || y1 < y0) return;
     // a huge query box touches more cells than there are particles: just scan
     if ((double)(x1 - x0 + 1) * (y1 - y0 + 1) > n_) {
@@ -73,8 +74,8 @@ void SpatialHash::queryImpl(const AABB& box, std::vector<int>& out) const {
         std::fill(stamp_.begin(), stamp_.end(), 0u);
         stampValue_ = 1;
     }
-    for (int y = y0; y <= y1; y++)
-        for (int x = x0; x <= x1; x++) {
+    for (long long y = y0; y <= y1; y++)
+        for (long long x = x0; x <= x1; x++) {
             int bkt = bucketOf(x, y);
             if (stamp_[bkt] == stampValue_) continue;
             stamp_[bkt] = stampValue_;
@@ -87,9 +88,10 @@ void SpatialHash::debugRects(std::vector<DebugRect>& out, int maxRects) const {
     // draw the cell of every particle once (cells, not buckets, are what is spatial)
     std::unordered_set<long long> drawn;
     for (int i = 0; i < n_ && (int)out.size() < maxRects; i++) {
-        int cx = cellCoord(minX_[i]), cy = cellCoord(minY_[i]);
-        long long key = ((long long)cx << 32) ^ (unsigned)cy;
+        long long cx = cellCoord(minX_[i]), cy = cellCoord(minY_[i]);
+        long long key = cx * 1000003LL ^ cy;
         if (!drawn.insert(key).second) continue;
-        out.push_back({(float)(cx * cellSize_), (float)(cy * cellSize_), (float)((cx + 1) * cellSize_), (float)((cy + 1) * cellSize_), 0});
+        out.push_back({(float)(cx * cellSize_), (float)(cy * cellSize_), (float)((cx + 1) * cellSize_),
+                       (float)((cy + 1) * cellSize_), 0});
     }
 }

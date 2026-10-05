@@ -22,6 +22,7 @@ void Quadtree::buildImpl(ThreadPool&) {
 void Quadtree::split(int idx) {
     Node node = nodes_[idx];
     if (node.end - node.begin <= kLeafSize || node.depth >= kMaxDepth) return;
+    if (node.box.width() <= maxBoxWidth_ && maxBoxWidth_ > 0) return;
     // halve before adding so huge coordinates can't overflow
     float mx = 0.5f * node.box.minX + 0.5f * node.box.maxX, my = 0.5f * node.box.minY + 0.5f * node.box.maxY;
     auto first = items_.begin() + node.begin, last = items_.begin() + node.end;

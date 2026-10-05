@@ -250,14 +250,33 @@ TEST(thread_pool_chunks_are_contiguous_and_ordered) {
 TEST(one_far_outlier_does_not_make_trees_or_hash_quadratic) {
     ThreadPool pool(1);
     Cloud c = makeCloud(5000, 23, 0);
-    c.x[0] = 1e9f;  // a single particle flung far away
     long long brute = 5000LL * 4999 / 2;
+    for (float far : {1e9f, 1e30f})
     for (BroadphaseKind k : {BroadphaseKind::SpatialHash, BroadphaseKind::Quadtree, BroadphaseKind::BVH,
                              BroadphaseKind::SweepAndPrune}) {
+        c.x[0] = far;  // a single particle flung far away
         auto bp = makeBroadphase(k);
         bp->build(c.input(), pool);
         std::vector<Pair> pairs;
         bp->findPairs(pairs, pool);
-        CHECK_MSG(bp->stats().tests * 10 < brute, "%s did %lld tests", broadphaseName(k), bp->stats().tests);
+        CHECK_MSG(bp->stats().tests * 10 < brute, "%s did %lld tests (outlier at %g)", broadphaseName(k), bp->stats().tests, far);
     }
+}
+
+TEST(spatial_hash_handles_points_far_from_the_origin) {
+    ThreadPool pool(1);
+    Cloud c;
+    std::mt19937 rng(31);
+    std::uniform_real_distribution<float> u(0, 1500);
+    for (int i = 0; i < 4000; i++) {
+        c.x.push_back(2e6f + u(rng));
+        c.y.push_back(2e6f + u(rng));
+        c.e.push_back(i % 2 ? 0.0f : 0.5f);
+    }
+    auto bp = makeBroadphase(BroadphaseKind::SpatialHash);
+    bp->build(c.input(), pool);
+    std::vector<Pair> pairs;
+    bp->findPairs(pairs, pool);
+    CHECK_MSG(bp->stats().tests < 100000, "spatial hash did %lld tests", bp->stats().tests);
+    checkAgainstScan(c, pool, "far from origin");
 }
