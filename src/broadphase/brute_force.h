@@ -6,12 +6,12 @@
 class BruteForce : public Broadphase {
 public:
     BroadphaseKind kind() const override { return BroadphaseKind::BruteForce; }
+
+protected:
     void queryImpl(const AABB& box, std::vector<int>& out) const override {
         for (int i = 0; i < n_; i++)
             if (boxOverlaps(i, box)) out.push_back(i);
     }
-
-protected:
     void buildImpl(ThreadPool&) override {}
     void findPairsImpl(ThreadPool& pool) override {
         pool.parallelFor(n_, [&](int worker, int begin, int end) {

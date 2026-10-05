@@ -3,23 +3,23 @@
 #include <cmath>
 
 namespace {
-// floor(v) clamped to [0, last] without ever converting an out-of-range float to int
-int clampedCell(float v, int last) {
-    float f = std::floor(v);
+// floor(v) clamped to [0, last] without ever converting an out-of-range value to int
+int clampedCell(double v, int last) {
+    double f = std::floor(v);
     if (!(f > 0)) return 0;  // also catches NaN
-    if (f >= (float)last) return last;
+    if (f >= (double)last) return last;
     return (int)f;
 }
 }  // namespace
 
-int UniformGrid::cellX(float x) const { return clampedCell((x - originX_) / cellSize_, cols_ - 1); }
-int UniformGrid::cellY(float y) const { return clampedCell((y - originY_) / cellSize_, rows_ - 1); }
+int UniformGrid::cellX(double x) const { return clampedCell((x - originX_) / cellSize_, cols_ - 1); }
+int UniformGrid::cellY(double y) const { return clampedCell((y - originY_) / cellSize_, rows_ - 1); }
 
 void UniformGrid::buildImpl(ThreadPool& pool) {
-    // Two boxes can only overlap if their centres are at most 2*maxExtent apart,
-    // so with this cell size overlapping boxes always sit in the same or adjacent
-    // cells. The small factor keeps that true under float rounding.
-    double cs = cellSizeFor(maxExtent_, bounds_);
+    // Boxes are binned by their min corner. Overlapping boxes have min corners at
+    // most maxBoxWidth_ apart, so with cells at least that wide they always sit in
+    // the same or adjacent cells (the factor absorbs double rounding).
+    double cs = std::max(maxBoxWidth_ * (1 + 1e-6), 1e-3);
     originX_ = bounds_.minX;
     originY_ = bounds_.minY;
     double w = std::max((double)bounds_.maxX - bounds_.minX, cs);
@@ -37,7 +37,7 @@ void UniformGrid::buildImpl(ThreadPool& pool) {
     itemCell_.resize(n_);
     cellItems_.resize(n_);
     pool.parallelFor(n_, [&](int, int b, int e) {
-        for (int i = b; i < e; i++) itemCell_[i] = cellY(cy_[i]) * cols_ + cellX(cx_[i]);
+        for (int i = b; i < e; i++) itemCell_[i] = cellY(minY_[i]) * cols_ + cellX(minX_[i]);
     }, 4096);
     for (int i = 0; i < n_; i++) cellStart_[itemCell_[i] + 1]++;
     for (int c = 0; c < cells; c++) cellStart_[c + 1] += cellStart_[c];
@@ -80,8 +80,9 @@ void UniformGrid::findPairsImpl(ThreadPool& pool) {
 
 void UniformGrid::queryImpl(const AABB& box, std::vector<int>& out) const {
     if (n_ == 0) return;
-    int x0 = cellX(box.minX - maxExtent_), x1 = cellX(box.maxX + maxExtent_);
-    int y0 = cellY(box.minY - maxExtent_), y1 = cellY(box.maxY + maxExtent_);
+    // a box overlapping the query has its min corner in [query.min - maxWidth, query.max]
+    int x0 = cellX((double)box.minX - maxBoxWidth_), x1 = cellX(box.maxX);
+    int y0 = cellY((double)box.minY - maxBoxWidth_), y1 = cellY(box.maxY);
     for (int y = y0; y <= y1; y++)
         for (int x = x0; x <= x1; x++) {
             int c = y * cols_ + x;
@@ -93,7 +94,7 @@ void UniformGrid::queryImpl(const AABB& box, std::vector<int>& out) const {
 void UniformGrid::debugRects(std::vector<DebugRect>& out, int maxRects) const {
     for (int c = 0; c < cols_ * rows_ && (int)out.size() < maxRects; c++) {
         if (cellStart_[c] == cellStart_[c + 1]) continue;
-        float x = originX_ + (c % cols_) * cellSize_, y = originY_ + (c / cols_) * cellSize_;
-        out.push_back({x, y, x + cellSize_, y + cellSize_, 0});
+        double x = originX_ + (c % cols_) * cellSize_, y = originY_ + (c / cols_) * cellSize_;
+        out.push_back({(float)x, (float)y, (float)(x + cellSize_), (float)(y + cellSize_), 0});
     }
 }

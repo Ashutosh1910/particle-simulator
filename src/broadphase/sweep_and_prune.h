@@ -8,14 +8,13 @@
 class SweepAndPrune : public Broadphase {
 public:
     BroadphaseKind kind() const override { return BroadphaseKind::SweepAndPrune; }
-    void queryImpl(const AABB& box, std::vector<int>& out) const override;
 
 protected:
+    void queryImpl(const AABB& box, std::vector<int>& out) const override;
     void buildImpl(ThreadPool& pool) override;
     void findPairsImpl(ThreadPool& pool) override;
 
 private:
     std::vector<int> order_;      // indices sorted by minX
     std::vector<float> sortedMinX_;
-    float maxWidth_ = 0;  // widest box
 };

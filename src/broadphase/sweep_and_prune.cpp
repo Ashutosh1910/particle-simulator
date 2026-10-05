@@ -12,11 +12,7 @@ void SweepAndPrune::buildImpl(ThreadPool&) {
         return minX_[a] < minX_[b] || (minX_[a] == minX_[b] && a < b);
     });
     sortedMinX_.resize(n_);
-    maxWidth_ = 0;
-    for (int k = 0; k < n_; k++) {
-        sortedMinX_[k] = minX_[order_[k]];
-        maxWidth_ = std::max(maxWidth_, maxX_[k] - minX_[k]);
-    }
+    for (int k = 0; k < n_; k++) sortedMinX_[k] = minX_[order_[k]];
 }
 
 void SweepAndPrune::findPairsImpl(ThreadPool& pool) {
@@ -41,7 +37,7 @@ void SweepAndPrune::queryImpl(const AABB& box, std::vector<int>& out) const {
     // boxes starting right of the query cannot overlap it; boxes starting left of
     // it can only overlap if they start within the widest box of its left edge
     // (plus a few ulps for rounding; boxOverlaps does the exact test)
-    float margin = maxWidth_ * 1.0001f + 8.0f * FLT_EPSILON * std::fabs(box.minX);
+    float margin = (float)maxBoxWidth_ * 1.0001f + 8.0f * FLT_EPSILON * std::fabs(box.minX);
     auto first = std::lower_bound(sortedMinX_.begin(), sortedMinX_.end(), box.minX - margin);
     for (auto it = first; it != sortedMinX_.end() && *it <= box.maxX; ++it) {
         int i = order_[it - sortedMinX_.begin()];

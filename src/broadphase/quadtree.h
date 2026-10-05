@@ -9,16 +9,17 @@
 class Quadtree : public Broadphase {
 public:
     BroadphaseKind kind() const override { return BroadphaseKind::Quadtree; }
-    void queryImpl(const AABB& box, std::vector<int>& out) const override;
     void debugRects(std::vector<DebugRect>& out, int maxRects) const override;
 
 protected:
+    void queryImpl(const AABB& box, std::vector<int>& out) const override;
     void buildImpl(ThreadPool& pool) override;
     void findPairsImpl(ThreadPool& pool) override;
 
 private:
     static constexpr int kLeafSize = 8;
-    static constexpr int kMaxDepth = 20;
+    // deep enough that one far outlier (1e9 px away) doesn't force the whole cloud into one leaf
+    static constexpr int kMaxDepth = 48;
     struct Node {
         AABB box;
         int firstChild;  // -1 for leaves; children are firstChild..firstChild+3

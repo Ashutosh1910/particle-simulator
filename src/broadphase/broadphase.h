@@ -77,6 +77,12 @@ protected:
     std::vector<float> cx_, cy_;                    // box centres
     std::vector<float> minX_, minY_, maxX_, maxY_;  // boxes
     float maxExtent_ = 0;
+    // Widest stored box side (computed in double). Two overlapping boxes have
+    // min corners at most this far apart on each axis, so grid-like structures
+    // binning boxes by their min corner with cells at least this wide only need
+    // to look at adjacent cells. Unlike a margin based on the largest coordinate,
+    // a single far-away particle doesn't inflate it.
+    double maxBoxWidth_ = 0;
     AABB bounds_;  // bounding box of all particle boxes
 
     // one cache line per worker so workers don't false-share vector headers
@@ -87,10 +93,6 @@ protected:
     std::vector<WorkerOutput> out_;
     BroadphaseStats stats_;
 };
-
-// Smallest safe cell size for grid-like structures: adjacent cells must contain
-// every pair of overlapping boxes, even after float rounding.
-float cellSizeFor(float maxExtent, const AABB& bounds);
 
 std::unique_ptr<Broadphase> makeBroadphase(BroadphaseKind kind);
 const char* broadphaseName(BroadphaseKind kind);

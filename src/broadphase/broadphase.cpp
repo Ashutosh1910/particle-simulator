@@ -32,6 +32,7 @@ void Broadphase::build(const BroadphaseInput& in, ThreadPool& pool) {
     cx_.resize(n_); cy_.resize(n_);
     minX_.resize(n_); minY_.resize(n_); maxX_.resize(n_); maxY_.resize(n_);
     maxExtent_ = 0;
+    maxBoxWidth_ = 0;
     bounds_ = AABB{0, 0, 0, 0};
     if (n_ > 0) bounds_ = AABB{FLT_MAX, FLT_MAX, -FLT_MAX, -FLT_MAX};
     for (int k = 0; k < n_; k++) {
@@ -41,6 +42,7 @@ void Broadphase::build(const BroadphaseInput& in, ThreadPool& pool) {
         minX_[k] = x - e; maxX_[k] = x + e;
         minY_[k] = y - e; maxY_[k] = y + e;
         maxExtent_ = std::max(maxExtent_, e);
+        maxBoxWidth_ = std::max({maxBoxWidth_, (double)maxX_[k] - minX_[k], (double)maxY_[k] - minY_[k]});
         bounds_.minX = std::min(bounds_.minX, minX_[k]);
         bounds_.minY = std::min(bounds_.minY, minY_[k]);
         bounds_.maxX = std::max(bounds_.maxX, maxX_[k]);
@@ -83,14 +85,6 @@ void Broadphase::queryAABB(const AABB& box, std::vector<int>& out) const {
     if (n_ > 0) queryImpl(box, out);
     if (!ids_.empty())
         for (size_t k = start; k < out.size(); k++) out[k] = ids_[out[k]];
-}
-
-float cellSizeFor(float maxExtent, const AABB& bounds) {
-    // Overlapping boxes have centres at most 2*maxExtent apart. Each stored box
-    // edge is rounded by up to half an ulp, so add a few ulps of the largest
-    // coordinate on top of the relative margin.
-    float maxAbs = std::max({std::fabs(bounds.minX), std::fabs(bounds.maxX), std::fabs(bounds.minY), std::fabs(bounds.maxY)});
-    return std::max(2.0f * maxExtent * 1.0001f + 8.0f * FLT_EPSILON * maxAbs, 1e-3f);
 }
 
 std::unique_ptr<Broadphase> makeBroadphase(BroadphaseKind kind) {

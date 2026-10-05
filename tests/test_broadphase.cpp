@@ -246,3 +246,18 @@ TEST(thread_pool_chunks_are_contiguous_and_ordered) {
     CHECK(std::is_sorted(owner.begin(), owner.end()));
     CHECK(owner.front() == 0 && owner.back() == 3);
 }
+
+TEST(one_far_outlier_does_not_make_trees_or_hash_quadratic) {
+    ThreadPool pool(1);
+    Cloud c = makeCloud(5000, 23, 0);
+    c.x[0] = 1e9f;  // a single particle flung far away
+    long long brute = 5000LL * 4999 / 2;
+    for (BroadphaseKind k : {BroadphaseKind::SpatialHash, BroadphaseKind::Quadtree, BroadphaseKind::BVH,
+                             BroadphaseKind::SweepAndPrune}) {
+        auto bp = makeBroadphase(k);
+        bp->build(c.input(), pool);
+        std::vector<Pair> pairs;
+        bp->findPairs(pairs, pool);
+        CHECK_MSG(bp->stats().tests * 10 < brute, "%s did %lld tests", broadphaseName(k), bp->stats().tests);
+    }
+}
