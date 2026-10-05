@@ -1,2 +1,10 @@
 .vscode
+.DS_Store
+build/
+build-gpu/
 main
+psim
+psim_tests
+psim_bench
+third_party/raylib-gl43/
+__pycache__/
