@@ -200,6 +200,7 @@ private:
 
     // recording
     FILE* recordPipe_ = nullptr;
+    bool recordingFailed_ = false;
     long long frameIndex_ = 0;
     bool recording() const { return recordPipe_ != nullptr; }
     bool quit_ = false;

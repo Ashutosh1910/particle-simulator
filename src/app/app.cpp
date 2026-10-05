@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <cmath>
 #include <csignal>
+#ifndef _WIN32
+#include <sys/wait.h>
+#endif
 #include <cstdio>
 #include <fstream>
 #include <random>
@@ -137,7 +140,8 @@ int App::run() {
         frame();
         if (options_.recordFrames > 0 && frameIndex_ >= options_.recordFrames) break;
     }
-    return 0;
+    endRecording();
+    return recordingFailed_ ? 1 : 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -167,6 +171,11 @@ void App::frame() {
     }
     float frameTime = recording() ? 1.0f / 60.0f : GetFrameTime();
 
+    // A press stays owned through the frame it is released on (raygui buttons fire
+    // on release); clear it only once that frame is over. This must happen here:
+    // raylib polls input inside EndDrawing, so checking after it would already
+    // see the next frame's button state.
+    if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT) && !IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) press_ = Press::None;
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
         Vector2 m = GetMousePosition();
         if (showHelp_) {
@@ -202,8 +211,6 @@ void App::frame() {
         captureFrame();
     }
     EndDrawing();
-    // released this frame: the UI (which reacts on release) has now seen it
-    if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT)) press_ = Press::None;
 
     if (!options_.statusFile.empty()) {
         if (FILE* f = std::fopen(options_.statusFile.c_str(), "w")) {
@@ -255,7 +262,7 @@ void App::setState(RunState s) {
         }
         toast("Edit mode: simulation paused. Space runs it again.");
     } else {
-        if (isEditTool(tool_)) tool_ = Tool::Grab;
+        if (isEditTool(tool_)) tool_ = toolAvailable(Tool::Grab, nullptr) ? Tool::Grab : Tool::Attract;
         if (s == RunState::Paused) toast(old == RunState::Editing ? "Left edit mode (paused)" : "Paused: N steps one frame");
         else toast("Running");
     }
@@ -318,7 +325,10 @@ void App::loadCurrentScene() {
         gpuActive_ = false;
         toast("GPU compute switched off: " + why);
     }
-    if (!toolAvailable(tool_, nullptr)) tool_ = state_ == RunState::Editing ? Tool::Ball : Tool::Grab;
+    if (!toolAvailable(tool_, nullptr)) {
+        if (state_ == RunState::Editing) tool_ = Tool::Ball;
+        else tool_ = toolAvailable(Tool::Grab, nullptr) ? Tool::Grab : Tool::Attract;
+    }
     if (colorMode_ == ColorMode::Density && world_.params.model != PhysicsModel::SPH) colorMode_ = ColorMode::Base;
 }
 
@@ -633,6 +643,7 @@ void App::beginRecording() {
     recordPipe_ = popen(cmd, "w");
     if (!recordPipe_) {
         std::fprintf(stderr, "recording: could not start ffmpeg (is it installed?)\n");
+        recordingFailed_ = true;
         quit_ = true;
     }
 }
@@ -647,6 +658,7 @@ void App::captureFrame() {
     RL_FREE(pixels);
     if (!ok) {
         std::fprintf(stderr, "recording: ffmpeg stopped accepting frames (bad output path?)\n");
+        recordingFailed_ = true;
         endRecording();
         quit_ = true;
     }
@@ -656,7 +668,13 @@ void App::endRecording() {
     if (recordPipe_) {
         int status = pclose(recordPipe_);
         recordPipe_ = nullptr;
-        if (status != 0) std::fprintf(stderr, "recording: ffmpeg exited with status %d\n", status);
+#ifndef _WIN32
+        if (status != -1 && WIFEXITED(status)) status = WEXITSTATUS(status);
+#endif
+        if (status != 0) {
+            std::fprintf(stderr, "recording: ffmpeg exited with status %d\n", status);
+            recordingFailed_ = true;
+        }
         else std::printf("recording: wrote %s (%lld frames)\n", options_.recordPath.c_str(), frameIndex_);
     }
 }
