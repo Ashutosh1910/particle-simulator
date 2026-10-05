@@ -3,7 +3,8 @@
 
 // Region quadtree over particle centres, rebuilt each step by recursively
 // partitioning an index array in place (no per-node allocations). Nodes are
-// split until they hold <= kLeafSize particles. Each node also stores the union
+// split (at the middle of their particles' centres) until they hold <= kLeafSize
+// particles or all centres coincide. Each node also stores the union
 // of its particles' boxes, which queries test, so a box is found even if its
 // centre is in a neighbouring quadrant (a "loose" quadtree).
 // Adapts to uneven density far better than a fixed grid.

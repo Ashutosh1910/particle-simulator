@@ -41,8 +41,23 @@ void Quadtree::buildImpl(ThreadPool&) {
 void Quadtree::split(int idx) {
     Node node = nodes_[idx];
     if (node.end - node.begin <= kLeafSize || node.depth >= kMaxDepth) return;
-    // halve before adding so huge coordinates can't overflow
-    float mx = 0.5f * node.box.minX + 0.5f * node.box.maxX, my = 0.5f * node.box.minY + 0.5f * node.box.maxY;
+    // Split at the middle of the items' centres rather than of the quadrant: then
+    // every split separates items on at least one axis, so clusters of (nearly)
+    // identical points can't produce long chains of single-child nodes.
+    float cMinX = FLT_MAX, cMinY = FLT_MAX, cMaxX = -FLT_MAX, cMaxY = -FLT_MAX;
+    for (int k = node.begin; k < node.end; k++) {
+        int i = items_[k];
+        cMinX = std::min(cMinX, cx_[i]); cMaxX = std::max(cMaxX, cx_[i]);
+        cMinY = std::min(cMinY, cy_[i]); cMaxY = std::max(cMaxY, cy_[i]);
+    }
+    if (cMinX == cMaxX && cMinY == cMaxY) return;  // all centres coincide: nothing to separate
+    // halve before adding so huge coordinates can't overflow; an axis without
+    // spread puts its split past the items so they all land on one side
+    float mx = cMinX < cMaxX ? 0.5f * cMinX + 0.5f * cMaxX : node.box.maxX;
+    float my = cMinY < cMaxY ? 0.5f * cMinY + 0.5f * cMaxY : node.box.maxY;
+    // the midpoint can round down onto cMin; nudge it up so both sides get items
+    if (cMinX < cMaxX && !(mx > cMinX)) mx = std::nextafter(cMinX, FLT_MAX);
+    if (cMinY < cMaxY && !(my > cMinY)) my = std::nextafter(cMinY, FLT_MAX);
     auto first = items_.begin() + node.begin, last = items_.begin() + node.end;
     auto midY = std::partition(first, last, [&](int i) { return cy_[i] < my; });
     auto midTop = std::partition(first, midY, [&](int i) { return cx_[i] < mx; });

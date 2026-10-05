@@ -294,3 +294,21 @@ TEST(one_huge_particle_does_not_make_trees_quadratic) {
     }
     checkAgainstScan(c, pool, "huge particle");
 }
+
+TEST(quadtree_handles_many_stacks_of_identical_points) {
+    ThreadPool pool(1);
+    Cloud c;
+    std::mt19937 rng(37);
+    std::uniform_real_distribution<float> u(0, 2000);
+    for (int s = 0; s < 1500; s++) {
+        float x = u(rng), y = u(rng);
+        for (int k = 0; k < 9; k++) { c.x.push_back(x); c.y.push_back(y); c.e.push_back(1); }
+    }
+    auto bp = makeBroadphase(BroadphaseKind::Quadtree);
+    bp->build(c.input(), pool);
+    std::vector<Pair> pairs;
+    bp->findPairs(pairs, pool);
+    // deterministic proxy for the cost: tests stay near the ~55k overlapping pairs
+    CHECK_MSG(bp->stats().tests < 500000, "quadtree did %lld tests", bp->stats().tests);
+    checkAgainstScan(c, pool, "stacked duplicates");
+}
