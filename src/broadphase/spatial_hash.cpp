@@ -1,5 +1,6 @@
 #include "spatial_hash.h"
 
+#include <algorithm>
 #include <cmath>
 #include <unordered_set>
 
@@ -9,7 +10,7 @@ int SpatialHash::bucketOf(int cx, int cy) const {
 }
 
 void SpatialHash::buildImpl(ThreadPool& pool) {
-    cellSize_ = std::max(2.0f * maxExtent_ * 1.0001f, 1e-3f);
+    cellSize_ = cellSizeFor(maxExtent_, bounds_);
     tableSize_ = std::max(1, 2 * n_ + 1);
     bucketStart_.assign(tableSize_ + 1, 0);
     itemBucket_.resize(n_);
@@ -25,7 +26,7 @@ void SpatialHash::buildImpl(ThreadPool& pool) {
 
 void SpatialHash::findPairsImpl(ThreadPool& pool) {
     pool.parallelFor(n_, [&](int worker, int begin, int end) {
-        auto& out = perWorker_[worker];
+        auto& out = out_[worker].pairs;
         long long tests = 0;
         for (int i = begin; i < end; i++) {
             int cx = cellCoord(cx_[i]), cy = cellCoord(cy_[i]);
@@ -38,19 +39,22 @@ void SpatialHash::findPairsImpl(ThreadPool& pool) {
                     for (int s = 0; s < nSeen; s++) dup |= seen[s] == bkt;
                     if (dup) continue;
                     seen[nSeen++] = bkt;
-                    for (int k = bucketStart_[bkt]; k < bucketStart_[bkt + 1]; k++) {
-                        int j = bucketItems_[k];
-                        if (j <= i) continue;  // each pair is reported by its lower index
+                    // items in a bucket are in increasing index order (stable counting
+                    // sort); each pair is reported by its lower index, so start after i
+                    const int* first = bucketItems_.data() + bucketStart_[bkt];
+                    const int* last = bucketItems_.data() + bucketStart_[bkt + 1];
+                    for (const int* it = std::upper_bound(first, last, i); it != last; ++it) {
+                        int j = *it;
                         tests++;
                         if (boxesOverlap(i, j)) out.push_back({i, j});
                     }
                 }
         }
-        tests_[worker] += tests;
+        out_[worker].tests += tests;
     }, 256);
 }
 
-void SpatialHash::queryAABB(const AABB& box, std::vector<int>& out) const {
+void SpatialHash::queryImpl(const AABB& box, std::vector<int>& out) const {
     if (n_ == 0) return;
     int x0 = cellCoord(std::max(box.minX, bounds_.minX) - maxExtent_);
     int x1 = cellCoord(std::min(box.maxX, bounds_.maxX) + maxExtent_);

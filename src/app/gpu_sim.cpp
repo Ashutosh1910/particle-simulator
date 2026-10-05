@@ -15,7 +15,9 @@ typedef void (*PsimGlProc)(void);
 PsimGlProc glfwGetProcAddress(const char* procname);
 }
 typedef void (*PfnMemoryBarrier)(unsigned int barriers);
+typedef void (*PfnDeleteShader)(unsigned int shader);
 static PfnMemoryBarrier s_memoryBarrier = nullptr;
+static PfnDeleteShader s_deleteShader = nullptr;
 static const unsigned int kShaderStorageBarrierBit = 0x00002000;  // GL_SHADER_STORAGE_BARRIER_BIT
 static const unsigned int kBufferUpdateBarrierBit = 0x00000200;   // GL_BUFFER_UPDATE_BARRIER_BIT
 
@@ -189,7 +191,9 @@ unsigned compile(const char* body) {
     std::string src = std::string(kCommon) + body;
     unsigned shader = rlCompileShader(src.c_str(), RL_COMPUTE_SHADER);
     if (shader == 0) return 0;
-    return rlLoadComputeShaderProgram(shader);
+    unsigned program = rlLoadComputeShaderProgram(shader);
+    if (s_deleteShader) s_deleteShader(shader);  // the linked program keeps what it needs
+    return program;
 }
 
 void setInt(unsigned prog, const char* name, int v) {
@@ -240,6 +244,7 @@ bool GpuSim::init() {
         return false;
     }
     s_memoryBarrier = (PfnMemoryBarrier)glfwGetProcAddress("glMemoryBarrier");
+    s_deleteShader = (PfnDeleteShader)glfwGetProcAddress("glDeleteShader");
     progClear_ = compile(kClear);
     progIntegrate_ = compile(kIntegrate);
     progScan_ = compile(kScan);

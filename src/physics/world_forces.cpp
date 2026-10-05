@@ -1,6 +1,7 @@
 // Force-based models (Lennard-Jones, N-body gravity) and the SPH fluid.
 #include <chrono>
 #include <cmath>
+#include <iterator>
 #include <numeric>
 
 #include "world.h"
@@ -149,7 +150,6 @@ void World::substepForces(float h, int sub, int subs) {
     int n = p.size();
     const bool verlet = params.integrator == Integrator::Verlet;
     const Vec2 g = params.gravity;
-    const float damp = 1.0f / (1.0f + params.drag * h);
     const MouseForce m = mouse;
     // external acceleration (gravity + mouse field) for particle i
     auto ext = [&](int i, float& ax, float& ay) {
@@ -164,8 +164,9 @@ void World::substepForces(float h, int sub, int subs) {
             }
         }
     };
-    // v += (a_pair + a_ext) * dt, with implicit drag
+    // v += (a_pair + a_ext) * dt, with implicit drag over the same dt
     auto kick = [&](float dt) {
+        const float damp = 1.0f / (1.0f + params.drag * dt);
         pool_.parallelFor(n, [&](int, int b, int e) {
             for (int i = b; i < e; i++) {
                 if (p.invMass[i] == 0) continue;
@@ -186,21 +187,32 @@ void World::substepForces(float h, int sub, int subs) {
         }, 2048);
     };
 
+    // anything that changes the force law invalidates the cached accelerations
+    const float key[] = {(float)params.model, params.ljEpsilon, params.ljCutoff, params.G, params.softening, params.theta,
+                         params.barnesHut ? 1.0f : 0.0f};
+    if (!std::equal(std::begin(key), std::end(key), forceKey_)) {
+        std::copy(std::begin(key), std::end(key), forceKey_);
+        forcesValid_ = false;
+    }
+    // Accelerations are always evaluated at the end of a substep, after the walls
+    // have clamped positions, so they match the positions the next substep starts
+    // from (and the reported potential energy matches the reported kinetic energy).
+    if (!forcesValid_) computeForces();
     if (verlet) {
-        // velocity Verlet (kick-drift-kick): second order and time-reversible, so
-        // energy oscillates around the true value instead of drifting
-        if (!forcesValid_) computeForces();
+        // velocity Verlet (kick-drift-kick): second order and time-reversible
         kick(0.5f * h);
         drift();
         moveGrabbedParticle(sub, subs, h);
+        solveParticleWalls(h);
         computeForces();
         kick(0.5f * h);
     } else {
-        computeForces();
+        // symplectic Euler: v += a(x) dt, then x += v dt
         kick(h);
         drift();
         moveGrabbedParticle(sub, subs, h);
-        forcesValid_ = false;  // positions moved after the force evaluation
+        solveParticleWalls(h);
+        computeForces();
     }
     if (params.model == PhysicsModel::LennardJones) {
         applyThermostat(h);
@@ -219,7 +231,6 @@ void World::substepForces(float h, int sub, int subs) {
             }
         }, 2048);
     }
-    solveParticleWalls(h);
 }
 
 void World::computeForces() {
@@ -273,7 +284,9 @@ void World::computeLennardJones(double& potential, long long& interactions) {
                 float fMag = 24 * eps * (2 * s12 - s6) / rClamped - fCut;  // > 0 repulsive
                 fx += fMag * dx / r;
                 fy += fMag * dy / r;
-                localPe += 0.5 * (4 * eps * (s12 - s6) - vCut + (r - rc) * fCut);  // each pair is visited twice
+                // below the clamp the force is constant, so the potential continues linearly
+                double v = 4 * eps * (s12 - s6) - vCut + (rClamped - rc) * fCut + (rClamped - r) * fMag;
+                localPe += 0.5 * v;  // each pair is visited twice
             }
             p.ax[i] = fx * p.invMass[i];
             p.ay[i] = fy * p.invMass[i];
@@ -344,7 +357,7 @@ void World::buildBarnesHut() {
         if (node.child < 0) {
             for (int k = node.begin; k < node.end; k++) {
                 int i = bhItems_[k];
-                double mi = p.mass(i);
+                double mi = gmass_[i];
                 m += mi; mx += mi * p.x[i]; my += mi * p.y[i];
             }
         } else {
@@ -369,6 +382,11 @@ void World::computeGravity(bool barnesHut, std::vector<float>& ax, std::vector<f
     const int workers = pool_.threadCount();
     std::vector<double> pe(workers, 0.0);
     std::vector<long long> count(workers, 0);
+    // gravitational mass: a grabbed particle is kinematic (invMass 0) but still pulls
+    gmass_.resize(n);
+    for (int i = 0; i < n; i++) gmass_[i] = p.mass(i);
+    if (grab_.kind == GrabKind::Particle && grab_.index < n && grab_.savedInvMass > 0)
+        gmass_[grab_.index] = 1.0f / grab_.savedInvMass;
     if (barnesHut) buildBarnesHut();
 
     pool_.parallelFor(n, [&](int w, int b, int e) {
@@ -391,7 +409,7 @@ void World::computeGravity(bool barnesHut, std::vector<float>& ax, std::vector<f
             };
             if (!barnesHut) {
                 for (int j = 0; j < n; j++)
-                    if (j != i) pull(p.x[j], p.y[j], p.mass(j));
+                    if (j != i) pull(p.x[j], p.y[j], gmass_[j]);
             } else {
                 int top = 0;
                 stack[top++] = 0;
@@ -401,14 +419,17 @@ void World::computeGravity(bool barnesHut, std::vector<float>& ax, std::vector<f
                     if (node.child < 0) {
                         for (int k = node.begin; k < node.end; k++) {
                             int j = bhItems_[k];
-                            if (j != i) pull(p.x[j], p.y[j], p.mass(j));
+                            if (j != i) pull(p.x[j], p.y[j], gmass_[j]);
                         }
                         continue;
                     }
                     float dx = node.comX - xi, dy = node.comY - yi;
                     float size = 2 * node.half;
-                    // far enough: the whole cell acts like one mass at its centre of mass
-                    if (size * size < theta2 * (dx * dx + dy * dy)) {
+                    // far enough: the whole cell acts like one mass at its centre of mass.
+                    // A cell containing the particle itself is always opened (otherwise a
+                    // large theta would let the particle attract itself).
+                    bool containsSelf = std::fabs(xi - node.cx) <= node.half && std::fabs(yi - node.cy) <= node.half;
+                    if (!containsSelf && size * size < theta2 * (dx * dx + dy * dy)) {
                         pull(node.comX, node.comY, node.mass);
                     } else {
                         for (int c = 0; c < 4; c++) stack[top++] = node.child + c;
@@ -417,7 +438,7 @@ void World::computeGravity(bool barnesHut, std::vector<float>& ax, std::vector<f
             }
             ax[i] = accX;
             ay[i] = accY;
-            localPe += 0.5 * p.mass(i) * phi;
+            localPe += 0.5 * gmass_[i] * phi;
         }
         pe[w] += localPe;
         count[w] += localCount;

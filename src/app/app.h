@@ -64,6 +64,11 @@ private:
     const char* hintText() const;
 
     // ---- tools
+    // Ball tool pours continuously (fluid, molecules, or Rigid with Spray ticked)
+    bool ballSprays() const {
+        PhysicsModel m = world_.params.model;
+        return m == PhysicsModel::SPH || m == PhysicsModel::LennardJones || (m == PhysicsModel::Rigid && ballSpray_);
+    }
     void spawnBall(Vec2 pos, Vec2 vel);
     void sprayParticles(Vec2 pos);
     void eraseAt(Vec2 pos);
@@ -165,6 +170,13 @@ private:
     Rectangle panelRect_{};
     bool mouseOverUi_ = false;
     bool dropdownOpen_ = false;
+    // Who owns the current left-button press. A press that starts in the world never
+    // drives panel controls (and vice versa); a press that closes the help overlay
+    // or an open dropdown is swallowed until the button is released.
+    enum class Press { None, World, Ui, Swallow };
+    Press press_ = Press::None;
+    bool uiLocked() const { return press_ == Press::World || press_ == Press::Swallow || showHelp_; }
+    void applyGuiLock() const;
     bool sceneDropdownOpen_ = false;
     bool broadphaseDropdownOpen_ = false;
 

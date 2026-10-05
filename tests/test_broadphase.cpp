@@ -1,8 +1,11 @@
 #include <algorithm>
+#include <cmath>
+#include <limits>
 #include <random>
 #include <set>
 
 #include "../src/broadphase/broadphase.h"
+#include "../src/broadphase/uniform_grid.h"
 #include "test_framework.h"
 
 namespace {
@@ -131,4 +134,115 @@ TEST(thread_pool_covers_range_once) {
         pool.parallelFor(1000, [&](int, int b, int e) { for (int i = b; i < e; i++) hits[i]++; }, 1);
         CHECK(std::all_of(hits.begin(), hits.end(), [](int h) { return h == 1; }));
     }
+}
+
+namespace {
+// runs every broad phase and checks it against a direct O(n^2) scan of the input
+void checkAgainstScan(const Cloud& cloud, ThreadPool& pool, const char* label) {
+    std::vector<std::pair<int, int>> expected;
+    auto ok = [&](int i) { return std::isfinite(cloud.x[i]) && std::isfinite(cloud.y[i]) && std::isfinite(cloud.e[i]); };
+    int n = (int)cloud.x.size();
+    for (int i = 0; i < n; i++)
+        for (int j = i + 1; j < n; j++) {
+            if (!ok(i) || !ok(j)) continue;
+            AABB a{cloud.x[i] - cloud.e[i], cloud.y[i] - cloud.e[i], cloud.x[i] + cloud.e[i], cloud.y[i] + cloud.e[i]};
+            AABB b{cloud.x[j] - cloud.e[j], cloud.y[j] - cloud.e[j], cloud.x[j] + cloud.e[j], cloud.y[j] + cloud.e[j]};
+            if (overlaps(a, b)) expected.push_back({i, j});
+        }
+    for (int k = 0; k < (int)BroadphaseKind::Count; k++) {
+        auto bp = makeBroadphase((BroadphaseKind)k);
+        bp->build(cloud.input(), pool);
+        std::vector<Pair> pairs;
+        bp->findPairs(pairs, pool);
+        auto got = sortedPairs(pairs);
+        CHECK_MSG(got == expected, "%s (%s): %zu pairs, expected %zu", broadphaseName((BroadphaseKind)k), label, got.size(),
+                  expected.size());
+        CHECK(bp->count() == n);
+    }
+}
+}  // namespace
+
+TEST(broadphase_ignores_non_finite_particles) {
+    ThreadPool pool(2);
+    Cloud c = makeCloud(400, 11, 0);
+    float nan = std::numeric_limits<float>::quiet_NaN(), inf = std::numeric_limits<float>::infinity();
+    c.x[3] = nan;
+    c.y[50] = inf;
+    c.x[51] = -inf;
+    c.e[77] = nan;
+    checkAgainstScan(c, pool, "nan/inf");
+    Cloud tiny;
+    tiny.x = {0, nan, 1, 2};
+    tiny.y = {0, 0, 0, 0};
+    tiny.e = {1, 1, 1, 1};
+    checkAgainstScan(tiny, pool, "tiny nan");
+}
+
+TEST(broadphase_large_coordinates) {
+    ThreadPool pool(2);
+    for (float offset : {1e5f, 1e6f, 3e7f}) {
+        std::mt19937 rng(17);
+        std::uniform_real_distribution<float> u(0, 1);
+        Cloud c;
+        for (int i = 0; i < 600; i++) {
+            c.x.push_back(offset + u(rng) * 200);
+            c.y.push_back(offset + u(rng) * 200);
+            c.e.push_back(0.3f + u(rng));
+        }
+        checkAgainstScan(c, pool, "offset");
+    }
+}
+
+TEST(broadphase_huge_query_and_empty_inputs) {
+    ThreadPool pool(1);
+    Cloud c;
+    c.x = {0, 100, 200};
+    c.y = {0, 0, 0};
+    c.e = {1, 1, 1};
+    for (int k = 0; k < (int)BroadphaseKind::Count; k++) {
+        auto bp = makeBroadphase((BroadphaseKind)k);
+        bp->build(c.input(), pool);
+        std::vector<int> got;
+        bp->queryAABB({-1e20f, -1e20f, 1e20f, 1e20f}, got);
+        CHECK_MSG(got.size() == 3, "%s returned %zu of 3", broadphaseName((BroadphaseKind)k), got.size());
+        got.clear();
+        bp->queryAABB({-5000, -5000, 5000, 5000}, got);  // more cells than particles (hash falls back to a scan)
+        CHECK(got.size() == 3);
+        for (int n : {0, 1}) {
+            Cloud small;
+            for (int i = 0; i < n; i++) { small.x.push_back(5); small.y.push_back(5); small.e.push_back(1); }
+            bp->build(small.input(), pool);
+            std::vector<Pair> pairs;
+            bp->findPairs(pairs, pool);
+            CHECK(pairs.empty());
+            std::vector<int> q;
+            bp->queryAABB({0, 0, 10, 10}, q);
+            CHECK((int)q.size() == n);
+        }
+    }
+}
+
+TEST(uniform_grid_memory_bounded_with_far_outlier) {
+    ThreadPool pool(1);
+    Cloud c;
+    c.x = {0, 1e13f, 5, 6};
+    c.y = {0, 0, 3, 3};
+    c.e = {1, 1, 1, 1};
+    UniformGrid grid;
+    grid.build(c.input(), pool);
+    CHECK_MSG((long long)grid.cols() * grid.rows() <= 3 * 4096 + 1, "%d x %d cells", grid.cols(), grid.rows());
+    std::vector<Pair> pairs;
+    grid.findPairs(pairs, pool);
+    CHECK(pairs.size() == 1);
+}
+
+TEST(thread_pool_chunks_are_contiguous_and_ordered) {
+    ThreadPool pool(4);
+    std::vector<int> owner(1000, -1);
+    pool.parallelFor(1000, [&](int w, int b, int e) {
+        for (int i = b; i < e; i++) owner[i] = w;
+    }, 1);
+    // worker w must own the w-th contiguous chunk: owners never decrease
+    CHECK(std::is_sorted(owner.begin(), owner.end()));
+    CHECK(owner.front() == 0 && owner.back() == 3);
 }

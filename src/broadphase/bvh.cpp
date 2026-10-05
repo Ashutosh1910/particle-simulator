@@ -64,7 +64,7 @@ void BVH::visit(const AABB& box, Visit&& fn) const {
 
 void BVH::findPairsImpl(ThreadPool& pool) {
     pool.parallelFor(n_, [&](int worker, int begin, int end) {
-        auto& out = perWorker_[worker];
+        auto& out = out_[worker].pairs;
         long long tests = 0;
         for (int i = begin; i < end; i++) {
             AABB box{minX_[i], minY_[i], maxX_[i], maxY_[i]};
@@ -75,11 +75,11 @@ void BVH::findPairsImpl(ThreadPool& pool) {
                 }
             });
         }
-        tests_[worker] += tests;
+        out_[worker].tests += tests;
     }, 256);
 }
 
-void BVH::queryAABB(const AABB& box, std::vector<int>& out) const {
+void BVH::queryImpl(const AABB& box, std::vector<int>& out) const {
     visit(box, [&](int j) {
         if (boxOverlaps(j, box)) out.push_back(j);
     });

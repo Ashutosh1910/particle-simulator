@@ -2,27 +2,35 @@
 
 #include <cmath>
 
-int UniformGrid::cellX(float x) const {
-    return std::clamp((int)std::floor((x - originX_) / cellSize_), 0, cols_ - 1);
+namespace {
+// floor(v) clamped to [0, last] without ever converting an out-of-range float to int
+int clampedCell(float v, int last) {
+    float f = std::floor(v);
+    if (!(f > 0)) return 0;  // also catches NaN
+    if (f >= (float)last) return last;
+    return (int)f;
 }
-int UniformGrid::cellY(float y) const {
-    return std::clamp((int)std::floor((y - originY_) / cellSize_), 0, rows_ - 1);
-}
+}  // namespace
+
+int UniformGrid::cellX(float x) const { return clampedCell((x - originX_) / cellSize_, cols_ - 1); }
+int UniformGrid::cellY(float y) const { return clampedCell((y - originY_) / cellSize_, rows_ - 1); }
 
 void UniformGrid::buildImpl(ThreadPool& pool) {
     // Two boxes can only overlap if their centres are at most 2*maxExtent apart,
     // so with this cell size overlapping boxes always sit in the same or adjacent
     // cells. The small factor keeps that true under float rounding.
-    cellSize_ = std::max(2.0f * maxExtent_ * 1.0001f, 1e-3f);
+    double cs = cellSizeFor(maxExtent_, bounds_);
     originX_ = bounds_.minX;
     originY_ = bounds_.minY;
-    float w = std::max(bounds_.width(), cellSize_);
-    float h = std::max(bounds_.height(), cellSize_);
-    // Cap the number of cells so a few far-away particles can't explode memory.
+    double w = std::max((double)bounds_.maxX - bounds_.minX, cs);
+    double h = std::max((double)bounds_.maxY - bounds_.minY, cs);
+    // Cap the number of cells so far-away particles can't explode memory. The
+    // grid then gets coarse (and slow) instead: trees or the hash cope better.
     const double maxCells = std::max(4096.0, 4.0 * n_);
-    if ((double)(w / cellSize_) * (h / cellSize_) > maxCells) cellSize_ = std::sqrt(w * h / (float)maxCells) * 1.0001f;
-    cols_ = std::max(1, (int)std::ceil(w / cellSize_));
-    rows_ = std::max(1, (int)std::ceil(h / cellSize_));
+    if ((w / cs) * (h / cs) > maxCells) cs = std::max({cs, std::sqrt(w * h / maxCells), w / maxCells, h / maxCells}) * 1.0001;
+    cellSize_ = (float)cs;
+    cols_ = (int)std::clamp(std::ceil(w / cs), 1.0, maxCells);
+    rows_ = (int)std::clamp(std::ceil(h / cs), 1.0, maxCells);
 
     int cells = cols_ * rows_;
     cellStart_.assign(cells + 1, 0);
@@ -40,7 +48,7 @@ void UniformGrid::buildImpl(ThreadPool& pool) {
 
 void UniformGrid::findPairsImpl(ThreadPool& pool) {
     pool.parallelFor(rows_, [&](int worker, int rowBegin, int rowEnd) {
-        auto& out = perWorker_[worker];
+        auto& out = out_[worker].pairs;
         long long tests = 0;
         auto cellVsCell = [&](int a, int b) {
             for (int k = cellStart_[a]; k < cellStart_[a + 1]; k++) {
@@ -66,11 +74,11 @@ void UniformGrid::findPairsImpl(ThreadPool& pool) {
                 }
             }
         }
-        tests_[worker] += tests;
+        out_[worker].tests += tests;
     }, 1);
 }
 
-void UniformGrid::queryAABB(const AABB& box, std::vector<int>& out) const {
+void UniformGrid::queryImpl(const AABB& box, std::vector<int>& out) const {
     if (n_ == 0) return;
     int x0 = cellX(box.minX - maxExtent_), x1 = cellX(box.maxX + maxExtent_);
     int y0 = cellY(box.minY - maxExtent_), y1 = cellY(box.maxY + maxExtent_);

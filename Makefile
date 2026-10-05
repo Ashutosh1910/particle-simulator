@@ -13,7 +13,8 @@
 CXX      ?= g++
 CXXFLAGS ?= -O2
 CXXFLAGS += -std=c++17 -Wall -Wextra -MMD -MP
-BUILD    := build
+# separate object directories per configuration, so `make GPU=1` after `make` rebuilds
+BUILD    := build$(if $(filter 1,$(GPU)),-gpu)
 
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
@@ -34,6 +35,10 @@ ifeq ($(GPU),1)
     CXXFLAGS += -DPSIM_GPU
 endif
 
+# Relink psim whenever the configuration changes (e.g. `make` then `make GPU=1`)
+CONFIG := GPU=$(GPU) RAYLIB_PREFIX=$(RAYLIB_PREFIX)
+$(shell mkdir -p build; echo '$(CONFIG)' | cmp -s - build/config || echo '$(CONFIG)' > build/config)
+
 CORE_SRC  := $(wildcard src/core/*.cpp src/broadphase/*.cpp src/physics/*.cpp)
 APP_SRC   := $(wildcard src/app/*.cpp)
 TEST_SRC  := $(wildcard tests/*.cpp)
@@ -49,8 +54,8 @@ BENCH_OBJ := $(BENCH_SRC:%.cpp=$(BUILD)/%.o)
 all: psim
 build: psim
 
-psim: $(CORE_OBJ) $(APP_OBJ)
-	$(CXX) $^ -o $@ $(RAYLIB_LIBS) $(PLATFORM_LIBS)
+psim: $(CORE_OBJ) $(APP_OBJ) build/config
+	$(CXX) $(CORE_OBJ) $(APP_OBJ) -o $@ $(RAYLIB_LIBS) $(PLATFORM_LIBS)
 
 psim_tests: $(CORE_OBJ) $(TEST_OBJ)
 	$(CXX) $^ -o $@ -lpthread
@@ -77,7 +82,7 @@ bench: psim_bench
 	./psim_bench
 
 clean:
-	rm -rf $(BUILD) psim psim_tests psim_bench
+	rm -rf build build-gpu psim psim_tests psim_bench
 
 # Builds raylib 5.5 with OpenGL 4.3 into ./third_party/raylib-gl43 (for GPU=1):
 #   make raylib-gl43 && make GPU=1 RAYLIB_PREFIX=third_party/raylib-gl43

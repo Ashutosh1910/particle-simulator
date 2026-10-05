@@ -156,7 +156,7 @@ void App::drawWorld() {
     }
     // SPH particles are drawn wider than their collision radius so overlapping
     // discs read as a continuous liquid
-    const float sphDrawRadius = world_.params.model == PhysicsModel::SPH ? 0.3f * world_.params.sphRadius : 0.0f;
+    const float sphDrawRadius = world_.params.model == PhysicsModel::SPH ? 0.25f * world_.params.sphRadius : 0.0f;
     rlSetTexture(circleTex_.id);
     rlBegin(RL_QUADS);
     rlNormal3f(0, 0, 1);
@@ -205,7 +205,8 @@ void App::drawStructureOverlay() {
             label = "Barnes-Hut quadtree (cells with mass)";
         }
     } else {
-        if (state_ != RunState::Running && overlayStale_) {
+        // the CPU step rebuilds the broad phase itself; the GPU path and edits don't
+        if (gpuActive_ || (state_ != RunState::Running && overlayStale_)) {
             world_.rebuildBroadphase();
             overlayStale_ = false;
         }
@@ -251,8 +252,7 @@ void App::drawToolPreview() {
             DrawCircleLinesV(m, eraseRadius_, Color{255, 110, 110, 200});
             break;
         case Tool::Ball: {
-            bool spray = ballSpray_ || model == PhysicsModel::SPH || model == PhysicsModel::LennardJones;
-            if (spray) {
+            if (ballSprays()) {
                 DrawCircleLinesV(m, 12, ghost);
             } else if (dragging_) {
                 DrawCircleV({dragStart_.x, dragStart_.y}, ballRadius_, ghost);
@@ -330,7 +330,7 @@ const char* App::hintText() const {
             if (model == PhysicsModel::SPH) return "Fluid: hold the left button to pour fluid.   Space runs the simulation";
             if (model == PhysicsModel::LennardJones) return "Molecules: hold the left button to add molecules.   Space runs";
             if (model == PhysicsModel::NBody) return "Star: click to place, or drag to launch it (arrow = velocity).   Space runs";
-            return ballSpray_ ? "Ball: hold the left button to spray balls.   Space runs the simulation"
+            return ballSprays() ? "Ball: hold the left button to spray balls.   Space runs the simulation"
                               : "Ball: click to drop, or drag to throw (arrow = velocity).   Space runs the simulation";
         case Tool::Rope: return "Rope: drag from the anchor to the free end.   Space runs the simulation";
         case Tool::Blob: return "Soft body: click to drop a pressurised blob.   Space runs the simulation";
@@ -387,7 +387,7 @@ void App::drawHelpOverlay() {
         "   RUNNING  time advances. Grab / Attract / Repel act on the simulation.",
         "   PAUSED   time is frozen. Step (N) advances one frame; Grab moves objects.",
         "   EDITING  time is frozen. Edit tools add, draw and erase objects.",
-        "   Picking an edit tool enters EDITING automatically.",
+        "   Picking an edit tool enters EDITING; Attract / Repel resume RUNNING.",
         "",
         "Keys:",
         "   Space  run / pause          E  edit mode on / off       N  step (paused)",

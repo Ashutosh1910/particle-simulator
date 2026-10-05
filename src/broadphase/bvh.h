@@ -8,7 +8,7 @@
 class BVH : public Broadphase {
 public:
     BroadphaseKind kind() const override { return BroadphaseKind::BVH; }
-    void queryAABB(const AABB& box, std::vector<int>& out) const override;
+    void queryImpl(const AABB& box, std::vector<int>& out) const override;
     void debugRects(std::vector<DebugRect>& out, int maxRects) const override;
 
 protected:

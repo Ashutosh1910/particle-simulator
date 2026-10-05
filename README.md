@@ -125,7 +125,8 @@ is sequential by nature. To parallelise it anyway, the world is cut into vertica
 stripes at least one interaction range wide. Each pair belongs to the stripe of
 its left-most particle, so even stripes can't share particles and run in
 parallel, followed by the odd stripes. The stripe layout doesn't depend on the
-thread count, so results are **bit-identical for 1 or N threads** (tested).
+thread count, so results are **bit-identical for 1 or N threads**. The tests
+check this for all four models.
 
 ### Integrators and time stepping
 
@@ -135,13 +136,14 @@ dropped rather than spiralling, and the hint bar says so.
 
 * **Symplectic Euler**: `v += a dt; x += v dt`. Contacts use positional
   correction plus impulses with restitution and Coulomb friction. With
-  restitution 1, kinetic energy is conserved exactly.
+  restitution 1 and no gravity or friction, collisions conserve kinetic energy
+  exactly. Under gravity, very slow contacts are treated as resting.
 * **Verlet**:
   * Rigid model: position-based Verlet (PBD). Contacts and constraints project
     positions and velocity is derived from the motion. A velocity pass restores
     restitution and friction. Very stable for piles and cloth.
   * Force models (Lennard-Jones, N-body): velocity Verlet. It is second order:
-    in the tests its energy error is 0.13% against 2.2% for Euler.
+    in the tests its energy error is 0.27% against 1.7% for Euler.
 
 ### Physics models
 
@@ -158,8 +160,8 @@ dropped rather than spiralling, and the hint bar says so.
   Berendsen thermostat, and a live speed histogram against the 2D
   Maxwell-Boltzmann distribution.
 * **N-body**: softened gravity, either direct O(n²) or a Barnes-Hut quadtree
-  with an adjustable opening angle. With θ = 0 it matches direct summation
-  exactly (tested).
+  with an adjustable opening angle (θ ≤ 1). With θ = 0 it matches direct
+  summation up to rounding (tested).
 
 ### GPU path
 
@@ -173,7 +175,9 @@ substep:
 5. Jacobi collision, averaged over each particle's contacts
 
 Positions are read back every frame so the CPU world, the editing tools and the
-statistics stay in sync.
+statistics stay in sync. Because the GPU resolves all contacts at once from the
+previous state (Jacobi) instead of one after another, it is less exact than the
+CPU solver: an elastic gas loses a few percent of its energy per second.
 
 ## Recording the demo
 

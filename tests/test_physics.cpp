@@ -330,3 +330,80 @@ TEST(removing_particles_keeps_links_valid) {
     w.releaseGrab();
     CHECK(w.p.invMass[3] > 0);
 }
+
+TEST(drag_decays_velocity_at_the_same_rate_for_both_integrators) {
+    for (Integrator integ : {Integrator::SymplecticEuler, Integrator::Verlet}) {
+        World w;
+        w.params.model = PhysicsModel::LennardJones;
+        w.params.integrator = integ;
+        w.params.thermostat = false;
+        w.params.gravity = {0, 0};
+        w.params.drag = 1;
+        w.params.walls = false;
+        w.addParticle({0, 0}, {100, 0}, 4, 0, 0, 1);
+        for (int s = 0; s < 60; s++) w.step();  // 1 second
+        CHECK_MSG(std::fabs(w.p.vx[0] - 100 * std::exp(-1.0f)) < 1.0f, "integrator %d: v = %.2f, expected %.2f",
+                  (int)integ, w.p.vx[0], 100 * std::exp(-1.0f));
+    }
+}
+
+TEST(grabbed_particle_keeps_its_gravity) {
+    World w;
+    w.params.model = PhysicsModel::NBody;
+    w.params.walls = false;
+    w.addParticle({0, 0}, {0, 0}, 9, 0, 0, 9000);
+    w.addParticle({100, 0}, {0, 0}, 2, 0, 0, 1);
+    std::vector<float> ax, ay;
+    double pe;
+    long long n;
+    w.computeGravity(true, ax, ay, pe, n);
+    float before = ax[1];
+    w.grabParticle(0, {0, 0});
+    w.computeGravity(true, ax, ay, pe, n);
+    CHECK_MSG(std::fabs(ax[1] - before) < 1e-3f * std::fabs(before), "acceleration %.1f -> %.1f", before, ax[1]);
+    CHECK(w.p.x[0] == 0 && w.p.y[0] == 0);  // grabbing doesn't move the particle
+}
+
+// theta = 1 is the largest opening angle the UI allows. Plain monopole Barnes-Hut is
+// ~10% off there; letting a particle's own cell be approximated made it much worse.
+TEST(barnes_hut_error_bounded_at_max_theta) {
+    World w;
+    w.params.model = PhysicsModel::NBody;
+    w.params.theta = 1.0f;
+    std::mt19937 rng(9);
+    std::normal_distribution<float> g(0, 150);
+    for (int i = 0; i < 1000; i++) w.addParticle({g(rng), g(rng)}, {0, 0}, 2, 0, 0, 1);
+    std::vector<float> dax, day, bax, bay;
+    double pe;
+    long long n;
+    w.computeGravity(false, dax, day, pe, n);
+    w.computeGravity(true, bax, bay, pe, n);
+    double meanErr = 0;
+    for (int i = 0; i < w.p.size(); i++)
+        meanErr += std::hypot(dax[i] - bax[i], day[i] - bay[i]) / (std::hypot(dax[i], day[i]) + 1e-6);
+    meanErr /= w.p.size();
+    CHECK_MSG(meanErr < 0.15, "theta=1 mean relative error %g", meanErr);
+}
+
+TEST(every_model_is_identical_for_any_thread_count) {
+    for (PhysicsModel model : {PhysicsModel::SPH, PhysicsModel::LennardJones, PhysicsModel::NBody}) {
+        World a, b;
+        for (World* w : {&a, &b}) {
+            w->params.model = model;
+            w->bounds = {0, 0, 800, 600};
+            std::mt19937 rng(21);
+            std::uniform_real_distribution<float> u(0, 1);
+            for (int i = 0; i < 1500; i++)
+                w->addParticle({50 + 700 * u(rng), 50 + 500 * u(rng)}, {u(rng) * 50 - 25, u(rng) * 50 - 25}, 3.5f, 0, 0, 1);
+        }
+        a.setThreads(1);
+        b.setThreads(4);
+        for (int s = 0; s < 20; s++) {
+            a.step();
+            b.step();
+        }
+        bool same = true;
+        for (int i = 0; i < a.p.size(); i++) same &= a.p.x[i] == b.p.x[i] && a.p.y[i] == b.p.y[i];
+        CHECK_MSG(same, "%s differs between 1 and 4 threads", modelName(model));
+    }
+}

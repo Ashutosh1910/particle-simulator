@@ -52,7 +52,7 @@ struct Params {
     float sphViscosityQuadratic = 0.01f;
 
     // Lennard-Jones
-    float ljEpsilon = 20000;        // well depth (px^2/s^2 per unit mass)
+    float ljEpsilon = 20000;        // well depth (energy; molecules have mass 1, so px^2/s^2)
     float ljCutoff = 2.5f;          // in units of sigma
     bool thermostat = true;
     float targetTemperature = 1.0f; // in units of epsilon
@@ -156,7 +156,8 @@ public:
     // body is pulled by a damped spring attached at the grab point.
     void grabParticle(int i, Vec2 target);
     void grabBody(int i, Vec2 worldPoint);
-    void setGrabTarget(Vec2 target) { grab_.target = target; }
+    // Cursor position while grabbing (a grabbed particle keeps its offset to the cursor).
+    void setGrabTarget(Vec2 cursor);
     void releaseGrab();
     bool isGrabbing() const { return grab_.kind != GrabKind::None; }
     int grabbedParticle() const { return grab_.kind == GrabKind::Particle ? grab_.index : -1; }
@@ -182,7 +183,7 @@ private:
     struct Grab {
         GrabKind kind = GrabKind::None;
         int index = -1;
-        Vec2 local;   // body-space grab point
+        Vec2 local;   // body-space grab point, or particle offset from the cursor
         Vec2 target;
         Vec2 prevTarget;
         float savedInvMass = 0;
@@ -231,6 +232,8 @@ private:
     std::vector<int> stripeContactCount_;
 
     bool forcesValid_ = false;
+    float forceKey_[7] = {};  // force-law parameters the cached accelerations were computed with
+    std::vector<float> gmass_;  // gravitational masses for the current force evaluation
     double forcePotential_ = 0;
     Grab grab_;
     double time_ = 0;

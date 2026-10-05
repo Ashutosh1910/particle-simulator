@@ -3,8 +3,8 @@
 //   psim_bench [--n 1000,10000,50000] [--threads 1,4] [--repeat 5]
 //
 // For every layout, particle count and thread count it reports, per broad
-// phase, the AABB tests performed, the candidate pairs found and the average
-// build + pair-search time. Particle density is kept constant as n grows.
+// phase, the AABB tests performed, the candidate pairs found and the best
+// build + pair-search time over --repeat runs. Particle density is kept constant as n grows.
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -43,7 +43,8 @@ Cloud makeCloud(int n, int layout, unsigned seed) {
         if (layout == 1) r = u(rng) < 0.05f ? 20 + 20 * u(rng) : 2 + 2 * u(rng);
         if (layout == 2) {
             int cluster = i % 8;
-            float cx = side * (0.1f + 0.8f * ((cluster * 37) % 8) / 8.0f), cy = side * (0.1f + 0.8f * ((cluster * 53) % 8) / 8.0f);
+            // 3 and 5 are distinct permutations mod 8, so the clusters are spread out
+            float cx = side * (0.1f + 0.8f * ((cluster * 3) % 8) / 8.0f), cy = side * (0.1f + 0.8f * ((cluster * 5) % 8) / 8.0f);
             float a = u(rng) * 6.2832f, d = std::sqrt(u(rng)) * side * 0.06f;
             x = cx + std::cos(a) * d;
             y = cy + std::sin(a) * d;

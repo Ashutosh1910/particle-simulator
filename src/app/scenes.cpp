@@ -77,9 +77,10 @@ void addGalaxy(World& w, Rng& rng, Vec2 c, Vec2 drift, int count, float radius, 
     float enclosed = coreMass;
     for (int i = 0; i < count; i++) {
         const Star& s = stars[i];
-        // circular speed for the mass inside this radius (core + inner disc)
-        float v = std::sqrt(G * enclosed / std::sqrt(s.r * s.r + w.params.softening * w.params.softening)) *
-                  rng.uniform(0.95f, 1.05f);
+        // circular speed for the mass inside this radius (core + inner disc) under
+        // Plummer-softened gravity: v^2 = G M r^2 / (r^2 + eps^2)^(3/2)
+        float soft2 = s.r * s.r + w.params.softening * w.params.softening;
+        float v = std::sqrt(G * enclosed * s.r * s.r / (soft2 * std::sqrt(soft2))) * rng.uniform(0.95f, 1.05f);
         Vec2 dir{std::cos(s.a), std::sin(s.a)};
         Vec2 tangent = clockwise ? Vec2{dir.y, -dir.x} : Vec2{-dir.y, dir.x};
         int shade = std::min(4, (int)(5 * s.r / radius));
@@ -159,7 +160,7 @@ const std::vector<SceneInfo>& sceneList() {
         {"Galaxy (Barnes-Hut)", PhysicsModel::NBody,
          "A rotating disc of stars around a heavy core.\nToggle Barnes-Hut vs direct O(n^2) in Physics.", 4000, 200, 40000},
         {"Galaxy collision", PhysicsModel::NBody,
-         "Two discs on a collision course. Tidal tails form\nas they pass through each other.", 5000, 200, 40000},
+         "Two discs on a collision course. Tidal tails form\nas they pass through each other.", 3000, 200, 40000},
     };
     return scenes;
 }
@@ -314,16 +315,18 @@ void loadScene(World& w, int scene, int count, unsigned seed) {
             P.gravity = {0, 0};
             P.walls = false;
             P.integrator = Integrator::Verlet;
-            P.substeps = 2;
+            // close passes near the heavy cores are fast: fewer substeps visibly
+            // break energy conservation (2 substeps: +1700% in the collision)
+            P.substeps = scene == Galaxy ? 4 : 8;
             P.G = 1500;
-            P.softening = 8;
+            P.softening = scene == Galaxy ? 8.0f : 12.0f;
             Vec2 c{B.minX + W * 0.5f, B.minY + H * 0.5f};
             float R = std::min(W, H) * 0.42f;
             if (scene == Galaxy) {
                 addGalaxy(w, rng, c, {0, 0}, count, R, 9000, 0, false);
             } else {
-                addGalaxy(w, rng, c + Vec2{-W * 0.25f, -H * 0.12f}, {40, 12}, count / 2, R * 0.55f, 6000, 0, false);
-                addGalaxy(w, rng, c + Vec2{W * 0.25f, H * 0.12f}, {-40, -12}, count - count / 2, R * 0.55f, 6000, 5, true);
+                addGalaxy(w, rng, c + Vec2{-W * 0.25f, -H * 0.12f}, {25, 8}, count / 2, R * 0.55f, 6000, 0, false);
+                addGalaxy(w, rng, c + Vec2{W * 0.25f, H * 0.12f}, {-25, -8}, count - count / 2, R * 0.55f, 6000, 5, true);
             }
             break;
         }

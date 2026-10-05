@@ -213,7 +213,11 @@ void World::solveParticleContacts(float h, bool positionBased) {
     float width = std::max(2.0f * maxExtent * 1.001f, std::max(bounds.width(), 1.0f) / 32.0f);
     int stripes = std::clamp((int)std::ceil((xMax - xMin) / width) + 1, 1, 4096);
     stripeOf_.resize(n);
-    for (int i = 0; i < n; i++) stripeOf_[i] = std::min(stripes - 1, (int)((p.x[i] - xMin) / width));
+    for (int i = 0; i < n; i++) {
+        // float clamp before the int conversion (NaN lands in stripe 0)
+        float f = (p.x[i] - xMin) / width;
+        stripeOf_[i] = f > 0 ? (f < (float)(stripes - 1) ? (int)f : stripes - 1) : 0;
+    }
     stripePairs_.resize(stripes);
     stripeContacts_.resize(stripes);
     stripeContactCount_.assign(stripes, 0);
@@ -510,9 +514,16 @@ void World::grabParticle(int i, Vec2 target) {
     if (i < 0 || i >= p.size()) return;
     grab_.kind = GrabKind::Particle;
     grab_.index = i;
-    grab_.target = grab_.prevTarget = target;
+    // keep the particle where it is; it follows the cursor at this offset
+    grab_.local = Vec2{p.x[i], p.y[i]} - target;
+    grab_.target = grab_.prevTarget = Vec2{p.x[i], p.y[i]};
     grab_.savedInvMass = p.invMass[i];
     p.invMass[i] = 0;  // kinematic while held: pushes everything, nothing pushes it
+    invalidate();
+}
+
+void World::setGrabTarget(Vec2 cursor) {
+    grab_.target = grab_.kind == GrabKind::Particle ? cursor + grab_.local : cursor;
 }
 
 void World::grabBody(int i, Vec2 worldPoint) {
@@ -527,8 +538,10 @@ void World::grabBody(int i, Vec2 worldPoint) {
 }
 
 void World::releaseGrab() {
-    if (grab_.kind == GrabKind::Particle && grab_.index >= 0 && grab_.index < p.size())
+    if (grab_.kind == GrabKind::Particle && grab_.index >= 0 && grab_.index < p.size()) {
         p.invMass[grab_.index] = grab_.savedInvMass;
+        invalidate();  // its cached acceleration was computed while it was kinematic
+    }
     grab_ = Grab{};
 }
 

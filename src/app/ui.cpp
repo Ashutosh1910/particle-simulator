@@ -52,6 +52,11 @@ const char* toolTitle(Tool t) {
 
 }  // namespace
 
+void App::applyGuiLock() const {
+    if (dropdownOpen_ || uiLocked()) GuiLock();
+    else GuiUnlock();
+}
+
 void App::applyStyle() {
     GuiSetFont(font_);
     GuiSetStyle(DEFAULT, TEXT_SIZE, 15);
@@ -90,7 +95,7 @@ void App::drawToolbar() {
     float bw = std::clamp(available / 10.0f, 58.0f, 104.0f);
     float x = 8, y = 8, h = kToolbarHeight - 16;
     Vector2 mouse = GetMousePosition();
-    if (dropdownOpen_) GuiLock();
+    applyGuiLock();
     for (int k = 0; k < (int)Tool::Count; k++) {
         Tool t = (Tool)k;
         if (t == Tool::Ball) {
@@ -182,7 +187,7 @@ void App::drawPanel() {
     panelW_ = kPanelWidth - 32;
     dropdownOpen_ = sceneDropdownOpen_ || broadphaseDropdownOpen_;
     broadphaseDropdownVisible_ = false;
-    if (dropdownOpen_) GuiLock();
+    applyGuiLock();
 
     float y = 12;
     y = drawHeader(y);
@@ -208,10 +213,11 @@ void App::drawPanel() {
                          fmtInt((long long)world_.links.size()) + " links  |  t = " + fmtFloat("%.1f s", world_.time());
     text(footer, panelX_, fy, 14, kDim);
 
-    // dropdowns last so their open lists draw on top of everything
+    // dropdowns last so their open lists draw on top of everything (an open
+    // dropdown keeps working while locked: raygui exempts controls in edit mode)
     GuiUnlock();
     if (broadphaseDropdownVisible_) {
-        if (sceneDropdownOpen_) GuiLock();
+        if (sceneDropdownOpen_ || uiLocked()) GuiLock();
         int active = (int)world_.params.broadphase;
         if (GuiDropdownBox(broadphaseDropdownRect_, "Uniform grid;Spatial hash;Quadtree;Sweep and prune;BVH;Brute force O(n^2)",
                            &active, broadphaseDropdownOpen_))
@@ -228,7 +234,7 @@ void App::drawPanel() {
         broadphaseDropdownOpen_ = false;
     }
     {
-        if (broadphaseDropdownOpen_) GuiLock();
+        if (broadphaseDropdownOpen_ || uiLocked()) GuiLock();
         std::string items;
         for (const SceneInfo& s : sceneList()) items += (items.empty() ? "" : ";") + std::string(s.name);
         int active = scene_;
@@ -273,7 +279,7 @@ float App::drawHeader(float y) {
     if (state_ != RunState::Paused) GuiDisable();
     if (GuiButton({panelX_ + (bw + 6), y, bw, 30}, "Step")) stepOnce();
     GuiEnable();
-    if (dropdownOpen_) GuiLock();
+    applyGuiLock();
     if (GuiButton({panelX_ + 2 * (bw + 6), y, bw, 30}, state_ == RunState::Editing ? "Done" : "Edit"))
         setState(state_ == RunState::Editing ? RunState::Paused : RunState::Editing);
     if (GuiButton({panelX_ + 3 * (bw + 6), y, bw, 30}, "Reset")) {
@@ -328,7 +334,7 @@ float App::drawToolSection(float y) {
     DrawLineEx({panelX_, y}, {panelX_ + panelW_, y}, 1, Color{55, 60, 72, 255});
     y += 10;
     const PhysicsModel model = world_.params.model;
-    text(std::string("Tool: ") + toolTitle(tool_), panelX_, y, 16, WHITE, true);
+    text(std::string("Tool: ") + (toolLabel(tool_, model) + 2), panelX_, y, 16, WHITE, true);  // label without its key
     y += 26;
     const float sectionEnd = y + 80;  // fixed height so the tabs below don't jump around
     switch (tool_) {
@@ -397,7 +403,7 @@ float App::drawPhysicsTab(float y) {
     if (model == PhysicsModel::SPH || gpuActive_) GuiDisable();
     GuiToggleGroup({panelX_, y, (panelW_ - 4) / 2, 26}, "Symplectic Euler;Verlet", &integ);
     GuiEnable();
-    if (dropdownOpen_) GuiLock();
+    applyGuiLock();
     if (integ != (int)P.integrator && model != PhysicsModel::SPH && !gpuActive_) {
         P.integrator = (Integrator)integ;
         world_.invalidate();
@@ -405,7 +411,7 @@ float App::drawPhysicsTab(float y) {
     }
     y += 32;
     const char* desc = "";
-    if (gpuActive_) desc = "GPU: symplectic Euler with Jacobi contacts.";
+    if (gpuActive_) desc = "GPU: symplectic Euler with Jacobi contacts (approximate: loses a few % of energy).";
     else if (model == PhysicsModel::SPH) desc = "SPH uses its own predict-relax scheme (Clavet 2005).";
     else if (model == PhysicsModel::Rigid)
         desc = P.integrator == Integrator::Verlet ? "Position-based Verlet: very stable stacks and cloth."
@@ -427,12 +433,15 @@ float App::drawPhysicsTab(float y) {
             {
                 bool tear = P.tearRatio > 1;
                 bool before = tear;
-                checkRow(y, "Tear links", &tear, !world_.links.empty());
+                bool hasLinks = !world_.links.empty();
+                checkRow(y, "Tear links", &tear, hasLinks);
                 if (tear != before) P.tearRatio = tear ? 1.6f : 0;
                 if (tear) {
+                    if (!hasLinks) GuiDisable();
                     float ratio = P.tearRatio;
                     Rectangle r{panelX_ + 128, y + 2, panelW_ - 128 - 70, 18};
                     GuiSliderBar(r, nullptr, nullptr, &ratio, 1.2f, 3.0f);
+                    GuiEnable();
                     P.tearRatio = ratio;
                     std::string v = fmtFloat("%.2fx", ratio);
                     text(v, panelX_ + panelW_ - textWidth(v, 15), y + 3, 15, kText);
@@ -465,7 +474,7 @@ float App::drawPhysicsTab(float y) {
                 world_.invalidate();
             }
             y += 32;
-            y = sliderRow(y, "Opening angle", &P.theta, 0.1f, 1.5f, "%.2f", P.barnesHut);
+            y = sliderRow(y, "Opening angle", &P.theta, 0.1f, 1.0f, "%.2f", P.barnesHut);
             y = checkRow(y, "Walls", &P.walls);
             break;
         }
@@ -473,8 +482,7 @@ float App::drawPhysicsTab(float y) {
             break;
     }
     if (changed) gpuDirty_ = true;
-    GuiUnlock();
-    if (dropdownOpen_) GuiLock();
+    applyGuiLock();
 
     float bottom = panelRect_.height - 44;
     if (model == PhysicsModel::LennardJones) {
@@ -679,7 +687,7 @@ float App::drawPerformanceTab(float y) {
     if (!canCompare) GuiDisable();
     if (GuiButton({panelX_, y, panelW_, 28}, "Compare all broad phases on this frame")) compareBroadphases();
     GuiEnable();
-    if (dropdownOpen_) GuiLock();
+    applyGuiLock();
     y += 34;
     if (!comparison_.empty()) y = noteRow(y, "Results are shown over the simulation.", kDim);
     return y;
@@ -771,7 +779,10 @@ void App::drawComparisonCard() {
     DrawRectangleRoundedLinesEx(r, 0.05f, 8, 1.5f, Color{110, 170, 255, 255});
     float x = r.x + 18, y = r.y + 14;
     text("Broad phases on the current " + fmtInt(world_.p.size()) + " particles", x, y, 18, WHITE, true);
-    if (GuiButton({r.x + w - 74, r.y + 10, 60, 26}, "Close")) {
+    applyGuiLock();
+    bool close = GuiButton({r.x + w - 74, r.y + 10, 60, 26}, "Close");
+    GuiUnlock();
+    if (close) {
         comparison_.clear();
         return;
     }

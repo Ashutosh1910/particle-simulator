@@ -1,6 +1,8 @@
 #include "quadtree.h"
 
 #include <algorithm>
+#include <cfloat>
+#include <cmath>
 #include <numeric>
 
 void Quadtree::buildImpl(ThreadPool&) {
@@ -10,6 +12,7 @@ void Quadtree::buildImpl(ThreadPool&) {
     if (n_ == 0) return;
     // square root cell around all centres
     float size = std::max({bounds_.width(), bounds_.height(), 1e-3f});
+    if (!std::isfinite(size)) size = FLT_MAX;  // coordinates near the float limit
     AABB root{bounds_.minX, bounds_.minY, bounds_.minX + size, bounds_.minY + size};
     nodes_.push_back({root, -1, 0, n_, 0});
     // breadth-first so nodes_ can grow while we iterate
@@ -19,7 +22,8 @@ void Quadtree::buildImpl(ThreadPool&) {
 void Quadtree::split(int idx) {
     Node node = nodes_[idx];
     if (node.end - node.begin <= kLeafSize || node.depth >= kMaxDepth) return;
-    float mx = 0.5f * (node.box.minX + node.box.maxX), my = 0.5f * (node.box.minY + node.box.maxY);
+    // halve before adding so huge coordinates can't overflow
+    float mx = 0.5f * node.box.minX + 0.5f * node.box.maxX, my = 0.5f * node.box.minY + 0.5f * node.box.maxY;
     auto first = items_.begin() + node.begin, last = items_.begin() + node.end;
     auto midY = std::partition(first, last, [&](int i) { return cy_[i] < my; });
     auto midTop = std::partition(first, midY, [&](int i) { return cx_[i] < mx; });
@@ -57,7 +61,7 @@ void Quadtree::visit(const AABB& box, Visit&& fn) const {
 
 void Quadtree::findPairsImpl(ThreadPool& pool) {
     pool.parallelFor(n_, [&](int worker, int begin, int end) {
-        auto& out = perWorker_[worker];
+        auto& out = out_[worker].pairs;
         long long tests = 0;
         for (int i = begin; i < end; i++) {
             AABB box{minX_[i], minY_[i], maxX_[i], maxY_[i]};
@@ -68,11 +72,11 @@ void Quadtree::findPairsImpl(ThreadPool& pool) {
                 }
             });
         }
-        tests_[worker] += tests;
+        out_[worker].tests += tests;
     }, 256);
 }
 
-void Quadtree::queryAABB(const AABB& box, std::vector<int>& out) const {
+void Quadtree::queryImpl(const AABB& box, std::vector<int>& out) const {
     visit(box, [&](int j) {
         if (boxOverlaps(j, box)) out.push_back(j);
     });

@@ -9,7 +9,7 @@
 class SpatialHash : public Broadphase {
 public:
     BroadphaseKind kind() const override { return BroadphaseKind::SpatialHash; }
-    void queryAABB(const AABB& box, std::vector<int>& out) const override;
+    void queryImpl(const AABB& box, std::vector<int>& out) const override;
     void debugRects(std::vector<DebugRect>& out, int maxRects) const override;
 
 protected:
@@ -17,7 +17,8 @@ protected:
     void findPairsImpl(ThreadPool& pool) override;
 
 private:
-    int cellCoord(float v) const { return (int)std::floor(v / cellSize_); }
+    // clamped so neighbouring-cell arithmetic (c +/- 1) can never overflow
+    int cellCoord(float v) const { return (int)std::clamp(std::floor(v / cellSize_), -1.0e9f, 1.0e9f); }
     int bucketOf(int cx, int cy) const;
 
     float cellSize_ = 1;
@@ -25,6 +26,6 @@ private:
     std::vector<int> bucketStart_;  // tableSize + 1
     std::vector<int> bucketItems_;
     std::vector<int> itemBucket_;
-    mutable std::vector<unsigned> stamp_;  // per-bucket visit marks for queryAABB
+    mutable std::vector<unsigned> stamp_;  // per-bucket visit marks for queryAABB (single-threaded)
     mutable unsigned stampValue_ = 0;
 };
