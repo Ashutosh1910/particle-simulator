@@ -1,15 +1,15 @@
 #include <vector>
+#include <algorithm>
+#include <cmath>
 #include "raylib.h"
 #include "raymath.h"
-#include <iostream>
 using namespace std;
 #define WALL_WIDTH 5
 #define WALL_HEIGHT 5
 #define PLAY 0
 #define PAUSE 1
 #define EDIT 2
-#define CELL_SIZE 100
-#define COEFF_OF_RESTITUTION 1
+#define COEFF_OF_RESTITUTION 1.0f
 class Ball
 {
 
@@ -17,190 +17,177 @@ class Ball
         Color color=WHITE;
         Vector2 pos;
         Vector2 velocity;
-        Vector2 acceleration;
+        Vector2 acceleration={0,0};
         float radius;
         float mass=1;
-        Ball(int x,int y,float radius,float velocityX,float velocityY){
-            this->pos=(Vector2){(float)x,(float)y};
-            this->velocity=(Vector2){(float)velocityX,(float)velocityY};
+        Ball(float x,float y,float radius,float velocityX,float velocityY){
+            this->pos=(Vector2){x,y};
+            this->velocity=(Vector2){velocityX,velocityY};
             this->radius=radius;
         }
 
-        
-};
-bool checkCollision(Ball* b1,Ball* b2){
-    if(
-        pow(b1->radius+b2->radius,2)>=( pow((b1->pos.x-b2->pos.x),2) + pow((b1->pos.y-b2->pos.y),2))
-    ) return true;
 
-    return false;
+};
+bool checkCollision(const Ball& b1,const Ball& b2){
+    float dx=b1.pos.x-b2.pos.x;
+    float dy=b1.pos.y-b2.pos.y;
+    float r=b1.radius+b2.radius;
+    return dx*dx+dy*dy<r*r;
 }
 
-void resolveCollisionElastic(Ball* ballA,Ball* ballB){
-    vector<Ball*> balls;balls.push_back(ballA);balls.push_back(ballB);
-    int i=0,j=1;
-    if (!balls[i] || !balls[j]) return;
+void resolveCollisionElastic(Ball& a,Ball& b){
     //to calculate a unit vector along AB
-    Vector2 normal={balls[j]->pos.x-balls[i]->pos.x,balls[j]->pos.y-balls[i]->pos.y};
+    Vector2 normal={b.pos.x-a.pos.x,b.pos.y-a.pos.y};
     float len_normal=sqrtf(normal.x*normal.x+normal.y*normal.y);
     if (len_normal == 0) return;
     normal.x/=len_normal;
     normal.y/=len_normal;
 
-    Vector2 relative_velocity={balls[j]->velocity.x-balls[i]->velocity.x,balls[j]->velocity.y-balls[i]->velocity.y};
-    float overlap=balls[i]->radius+balls[j]->radius- 
-                                    sqrtf((balls[i]->pos.x - balls[j]->pos.x)*(balls[i]->pos.x - balls[j]->pos.x) 
-                                    + (balls[i]->pos.y - balls[j]->pos.y)*(balls[i]->pos.y - balls[j]->pos.y));
-    
-    float total_mass=balls[i]->mass+balls[j]->mass;
-    float coeffA=overlap*balls[j]->mass/total_mass;
-    float coeffB=overlap*balls[i]->mass/total_mass;
+    Vector2 relative_velocity={b.velocity.x-a.velocity.x,b.velocity.y-a.velocity.y};
+    float overlap=a.radius+b.radius-len_normal;
+
+    float total_mass=a.mass+b.mass;
+    float coeffA=overlap*b.mass/total_mass;
+    float coeffB=overlap*a.mass/total_mass;
 
     //correcting ball positions so they do not sink
     //balls move distance proportional to the other balls mass
-    balls[i]->pos.x-=coeffA*normal.x;
-    balls[i]->pos.y-=coeffA*normal.y;
-    balls[j]->pos.x+=coeffB*normal.x;
-    balls[j]->pos.y+=coeffB*normal.y;
+    a.pos.x-=coeffA*normal.x;
+    a.pos.y-=coeffA*normal.y;
+    b.pos.x+=coeffB*normal.x;
+    b.pos.y+=coeffB*normal.y;
 
     if (Vector2DotProduct(relative_velocity, normal) > 0) return;
     //correcting velocity using impulse
     float impulse=-(1+COEFF_OF_RESTITUTION)*(normal.x*relative_velocity.x+normal.y*relative_velocity.y)*
-                        (balls[i]->mass*balls[j]->mass)/total_mass;
+                        (a.mass*b.mass)/total_mass;
 
-    balls[i]->velocity.x-=(impulse/balls[i]->mass)*normal.x;
-    balls[i]->velocity.y-=(impulse/balls[i]->mass)*normal.y;
-    balls[j]->velocity.x+=(impulse/balls[j]->mass)*normal.x;
-    balls[j]->velocity.y+=(impulse/balls[j]->mass)*normal.y;
+    a.velocity.x-=(impulse/a.mass)*normal.x;
+    a.velocity.y-=(impulse/a.mass)*normal.y;
+    b.velocity.x+=(impulse/b.mass)*normal.x;
+    b.velocity.y+=(impulse/b.mass)*normal.y;
 
-    balls[i]->color=RED;
-
+    a.color=RED;
+    b.color=RED;
 }
 
-void UpdateBalls(vector<Ball*>& balls,float dt){
+// Uniform grid stored as flat arrays (counting sort), reused between frames.
+// cellStart[c]..cellStart[c+1] indexes into cellBalls for cell c.
+struct Grid{
+    int cols=0,rows=0;
+    float cellSize=1;
+    vector<int> cellStart;
+    vector<int> cellBalls;
+    vector<int> ballCell;
+
+    int cellOf(float x,float y) const{
+        int cx=min(cols-1,max(0,(int)floorf(x/cellSize)));
+        int cy=min(rows-1,max(0,(int)floorf(y/cellSize)));
+        return cy*cols+cx;
+    }
+
+    void build(const vector<Ball>& balls,float width,float height){
+        // a ball can only touch balls in neighbouring cells if a cell is at least one diameter wide
+        float maxRadius=1;
+        for(const auto& b: balls) maxRadius=max(maxRadius,b.radius);
+        cellSize=2*maxRadius;
+        cols=max(1,(int)ceilf(width/cellSize));
+        rows=max(1,(int)ceilf(height/cellSize));
+
+        cellStart.assign(cols*rows+1,0);
+        ballCell.resize(balls.size());
+        cellBalls.resize(balls.size());
+        for(size_t i=0;i<balls.size();i++){
+            ballCell[i]=cellOf(balls[i].pos.x,balls[i].pos.y);
+            cellStart[ballCell[i]+1]++;
+        }
+        for(int c=0;c<cols*rows;c++) cellStart[c+1]+=cellStart[c];
+        vector<int> cursor(cellStart.begin(),cellStart.end()-1);
+        for(size_t i=0;i<balls.size();i++) cellBalls[cursor[ballCell[i]]++]=(int)i;
+    }
+};
+
+void collideCells(vector<Ball>& balls,const Grid& grid,int cellA,int cellB){
+    for(int k=grid.cellStart[cellA];k<grid.cellStart[cellA+1];k++){
+        // pairs inside the same cell are only visited once (n>k)
+        int start=(cellA==cellB)?k+1:grid.cellStart[cellB];
+        for(int n=start;n<grid.cellStart[cellB+1];n++){
+            Ball& a=balls[grid.cellBalls[k]];
+            Ball& b=balls[grid.cellBalls[n]];
+            if(checkCollision(a,b)) resolveCollisionElastic(a,b);
+        }
+    }
+}
+
+void UpdateBalls(vector<Ball>& balls,Grid& grid,float dt){
     if(balls.empty()) return;
- vector<vector<vector<Ball*>>> GRID(100,vector<vector<Ball*>>(100,vector<Ball*>(0)));
-//ball to wall collision
+    float width=(float)GetScreenWidth();
+    float height=(float)GetScreenHeight();
     for(auto& b: balls){
-        b->pos={
-            .x=b->pos.x+b->velocity.x*dt,
-            .y=b->pos.y+b->velocity.y*dt
-        };
-        
+        b.pos.x+=b.velocity.x*dt;
+        b.pos.y+=b.velocity.y*dt;
     }
-        for(auto& b: balls){
-            bool collisionX=false;
-            bool collisionY=false;
-            float prevx=b->pos.x-b->velocity.x*dt;
-            float prevy=b->pos.y-b->velocity.y*dt;
-            if(b->pos.x>=GetScreenWidth()-WALL_WIDTH-b->radius){
-                collisionX=true;
-                float t=(1/(prevx-b->pos.x))*(GetScreenWidth()-WALL_WIDTH-b->radius-b->pos.x);
-                b->pos.y=t*prevy+(1-t)*b->pos.y;
-                b->pos.x=GetScreenWidth()-WALL_WIDTH-b->radius;
-            }else if(b->pos.x<=WALL_WIDTH+b->radius){
-                collisionX=true;
-                float t=(1/(prevx-b->pos.x))*(WALL_WIDTH+b->radius-b->pos.x);
-                b->pos.y=t*prevy+(1-t)*b->pos.y;
-                b->pos.x=WALL_WIDTH+b->radius;
-            }
+    //ball to wall collision: clamp inside the walls and reflect the velocity
+    for(auto& b: balls){
+        float minX=WALL_WIDTH+b.radius,maxX=width-WALL_WIDTH-b.radius;
+        float minY=WALL_HEIGHT+b.radius,maxY=height-WALL_HEIGHT-b.radius;
+        if(b.pos.x>maxX){b.pos.x=maxX;b.velocity.x=-fabsf(b.velocity.x);}
+        else if(b.pos.x<minX){b.pos.x=minX;b.velocity.x=fabsf(b.velocity.x);}
+        if(b.pos.y>maxY){b.pos.y=maxY;b.velocity.y=-fabsf(b.velocity.y);}
+        else if(b.pos.y<minY){b.pos.y=minY;b.velocity.y=fabsf(b.velocity.y);}
+    }
 
-            if(b->pos.y>=GetScreenHeight()-WALL_HEIGHT-b->radius){
-                collisionY=true;
-                float t=(1/(prevy-b->pos.y))*(GetScreenHeight()-WALL_HEIGHT-b->radius-b->pos.y);
-                b->pos.x=t*prevx+(1-t)*b->pos.x;
-                b->pos.y=GetScreenHeight()-WALL_HEIGHT-b->radius;
-            }else if(b->pos.y<=WALL_HEIGHT+b->radius){
-                collisionY=true;
-                float t=(1/(prevy-b->pos.y))*(WALL_HEIGHT+b->radius-b->radius-b->pos.y);
-                b->pos.x=t*prevx+(1-t)*b->pos.x;
-                b->pos.y=WALL_HEIGHT+b->radius;
-            }
-
-            if(collisionX) b->velocity.x*=-1;
-            if(collisionY) b->velocity.y*=-1;
-           
-
-
-            GRID[min(99,max((int)b->pos.x/CELL_SIZE,0))][min(99,max(0,(int)b->pos.y/CELL_SIZE))].push_back(b);
-        }
     //ball to ball collision
-    for(int i=0;i<GRID.size();i++){
-        for(int j=0;j<GRID[i].size();j++){
-
-            if(GRID[i][j].empty()) continue;
-            for(int k=0;k<GRID[i][j].size();k++){
-                for(int n=k+1;n<GRID[i][j].size();n++){
-                    if(checkCollision(GRID[i][j][k],GRID[i][j][n])){
-                        resolveCollisionElastic(GRID[i][j][k],GRID[i][j][n]);
-                    }
-                }
-
-                if(i+1<GRID.size()&&!GRID[i+1][j].empty()){
-                    for(int n=0;n<GRID[i+1][j].size();n++){
-                        if(checkCollision(GRID[i+1][j][n],GRID[i][j][k])){
-                            resolveCollisionElastic(GRID[i+1][j][n],GRID[i][j][k]);
-                        }
-                    }
-                }
-
-                if(j+1<GRID[i].size()&&!GRID[i][j+1].empty()){
-                    for(int n=0;n<GRID[i][j+1].size();n++){
-                        if(checkCollision(GRID[i][j+1][n],GRID[i][j][k])){
-                            resolveCollisionElastic(GRID[i][j+1][n],GRID[i][j][k]);
-                        }
-                    }
-                }
-
-                if(i+1<GRID.size()&&j+1<GRID[i].size()&&!GRID[i+1][j+1].empty()){
-                    for(int n=0;n<GRID[i+1][j+1].size();n++){
-                        if(checkCollision(GRID[i+1][j+1][n],GRID[i][j][k])){
-                            resolveCollisionElastic(GRID[i+1][j+1][n],GRID[i][j][k]);
-                        }
-                    }
-                }
+    grid.build(balls,width,height);
+    // visit each cell together with 4 "forward" neighbours so every one of the
+    // 8 neighbours is covered exactly once: right, down-left, down, down-right
+    for(int cy=0;cy<grid.rows;cy++){
+        for(int cx=0;cx<grid.cols;cx++){
+            int c=cy*grid.cols+cx;
+            if(grid.cellStart[c]==grid.cellStart[c+1]) continue;
+            collideCells(balls,grid,c,c);
+            if(cx+1<grid.cols) collideCells(balls,grid,c,c+1);
+            if(cy+1<grid.rows){
+                if(cx>0) collideCells(balls,grid,c,c+grid.cols-1);
+                collideCells(balls,grid,c,c+grid.cols);
+                if(cx+1<grid.cols) collideCells(balls,grid,c,c+grid.cols+1);
             }
         }
     }
-
-
-
-
-
 }
-void RenderBalls(vector<Ball*>& balls){
-    for(auto& b: balls){
-        DrawCircle(b->pos.x,b->pos.y,b->radius,b->color);
+void RenderBalls(const vector<Ball>& balls){
+    for(const auto& b: balls){
+        DrawCircleV(b.pos,b.radius,b.color);
     }
 
 }
 
 
 int main(){
-    int SCREEN_WIDTH=GetScreenWidth();
-    int SCREEN_HEIGHT=GetScreenHeight();
+    const int SCREEN_WIDTH=1280;
+    const int SCREEN_HEIGHT=800;
 
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
     InitWindow(SCREEN_WIDTH,SCREEN_HEIGHT,"Physics Engine");
-    vector<Ball*> balls;
+    vector<Ball> balls;
+    Grid grid;
     for(int i=0;i<100;i++){
-
-        auto b= new Ball(GetRandomValue(50,900),GetRandomValue(50,900),10,GetRandomValue(-900,900),GetRandomValue(500,500));
-        balls.push_back(b);
+        balls.emplace_back((float)GetRandomValue(50,SCREEN_WIDTH-50),(float)GetRandomValue(50,SCREEN_HEIGHT-50),10.0f,
+                           (float)GetRandomValue(-900,900),(float)GetRandomValue(-900,900));
     }
 
- 
+
     SetExitKey(KEY_Q);
     SetTargetFPS(60);
 
     while(!WindowShouldClose()){
         float dt=GetFrameTime();
 
-        UpdateBalls(balls,dt);
+        UpdateBalls(balls,grid,dt);
 
         BeginDrawing();
         ClearBackground(WHITE);
-        DrawRectangle(WALL_WIDTH,WALL_HEIGHT,GetScreenWidth()-2*WALL_WIDTH,GetScreenWidth()-2*WALL_HEIGHT,BLACK);
+        DrawRectangle(WALL_WIDTH,WALL_HEIGHT,GetScreenWidth()-2*WALL_WIDTH,GetScreenHeight()-2*WALL_HEIGHT,BLACK);
         DrawFPS(0,0);
         RenderBalls(balls);
         EndDrawing();
@@ -209,5 +196,6 @@ int main(){
 
     }
 
+    CloseWindow();
     return 0;
 }
