@@ -315,11 +315,13 @@ void loadScene(World& w, int scene, int count, unsigned seed) {
             P.gravity = {0, 0};
             P.walls = false;
             P.integrator = Integrator::Verlet;
-            // close passes near the heavy cores are fast: fewer substeps visibly
-            // break energy conservation (2 substeps: +1700% in the collision)
+            // close passes between the heavy cores are fast: with too few substeps or
+            // too little softening energy is visibly not conserved (collision, max
+            // |dE| over 15 s: 2 substeps +1700%, 8 substeps/softening 12 18%,
+            // 8 substeps/softening 20 2%)
             P.substeps = scene == Galaxy ? 4 : 8;
             P.G = 1500;
-            P.softening = scene == Galaxy ? 8.0f : 12.0f;
+            P.softening = scene == Galaxy ? 8.0f : 20.0f;
             Vec2 c{B.minX + W * 0.5f, B.minY + H * 0.5f};
             float R = std::min(W, H) * 0.42f;
             if (scene == Galaxy) {

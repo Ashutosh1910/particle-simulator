@@ -523,7 +523,18 @@ void World::grabParticle(int i, Vec2 target) {
 }
 
 void World::setGrabTarget(Vec2 cursor) {
-    grab_.target = grab_.kind == GrabKind::Particle ? cursor + grab_.local : cursor;
+    if (grab_.kind != GrabKind::Particle) {
+        grab_.target = cursor;
+        return;
+    }
+    Vec2 t = cursor + grab_.local;
+    if (params.walls && grab_.index < p.size()) {
+        // walls don't act on the kinematic particle, so keep it inside them here
+        float r = p.radius[grab_.index];
+        t.x = std::clamp(t.x, std::min(bounds.minX + r, bounds.maxX - r), std::max(bounds.minX + r, bounds.maxX - r));
+        t.y = std::clamp(t.y, std::min(bounds.minY + r, bounds.maxY - r), std::max(bounds.minY + r, bounds.maxY - r));
+    }
+    grab_.target = t;
 }
 
 void World::grabBody(int i, Vec2 worldPoint) {

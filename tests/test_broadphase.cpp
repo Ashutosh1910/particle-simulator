@@ -280,3 +280,17 @@ TEST(spatial_hash_handles_points_far_from_the_origin) {
     CHECK_MSG(bp->stats().tests < 100000, "spatial hash did %lld tests", bp->stats().tests);
     checkAgainstScan(c, pool, "far from origin");
 }
+
+TEST(one_huge_particle_does_not_make_trees_quadratic) {
+    ThreadPool pool(1);
+    Cloud c = makeCloud(5000, 29, 0);
+    c.e[0] = 300;  // one particle far bigger than the rest
+    for (BroadphaseKind k : {BroadphaseKind::Quadtree, BroadphaseKind::BVH}) {
+        auto bp = makeBroadphase(k);
+        bp->build(c.input(), pool);
+        std::vector<Pair> pairs;
+        bp->findPairs(pairs, pool);
+        CHECK_MSG(bp->stats().tests < 200000, "%s did %lld tests", broadphaseName(k), bp->stats().tests);
+    }
+    checkAgainstScan(c, pool, "huge particle");
+}

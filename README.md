@@ -96,7 +96,7 @@ answers region queries, which the polygon bodies use to find nearby particles.
 |-------------|------|---------|
 | Uniform grid | counting-sort into cells ≥ largest box; each cell vs itself + 4 forward neighbours | uniform sizes (fastest here) |
 | Spatial hash | unbounded cells hashed into ~2n buckets | no world bounds, sparse worlds |
-| Quadtree | recursive in-place partition, ≤ 8 per leaf | clustered particles |
+| Quadtree | recursive in-place partition, ≤ 8 per leaf, loose node bounds | clustered particles |
 | Sweep and prune | sort by left edge, sweep along x | mixed sizes, no tuning |
 | BVH | top-down median split, exact node bounds | very mixed sizes (fewest tests) |
 | Brute force | all n(n−1)/2 pairs | reference / baseline |
@@ -143,7 +143,8 @@ dropped rather than spiralling, and the hint bar says so.
     positions and velocity is derived from the motion. A velocity pass restores
     restitution and friction. Very stable for piles and cloth.
   * Force models (Lennard-Jones, N-body): velocity Verlet. It is second order:
-    in the tests its energy error is 0.27% against 1.7% for Euler.
+    in the Lennard-Jones test its largest energy error over the run is 0.45%,
+    against 2.6% for Euler.
 
 ### Physics models
 

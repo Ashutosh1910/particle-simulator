@@ -133,14 +133,18 @@ TEST(velocity_verlet_conserves_lennard_jones_energy) {
             for (int x = 0; x < 15; x++) w.addParticle({100 + x * 12.0f, 100 + y * 12.0f}, {v(rng), v(rng)}, 4, 0, 0, 1);
         w.step();
         double e0 = totalEnergy(w);
-        for (int s = 0; s < 300; s++) w.step();
-        double e1 = totalEnergy(w);
-        drift[mode] = std::fabs(e1 - e0) / std::fabs(e0);
+        // largest deviation over the run: the end point alone depends on the seed
+        double worst = 0;
+        for (int s = 0; s < 300; s++) {
+            w.step();
+            worst = std::max(worst, std::fabs(totalEnergy(w) - e0) / std::fabs(e0));
+        }
+        drift[mode] = worst;
         CHECK(allFinite(w));
     }
-    CHECK_MSG(drift[0] < 0.005, "velocity Verlet energy drift %.3f%%", drift[0] * 100);
-    CHECK(drift[0] < drift[1]);
-    std::printf("    LJ energy drift: velocity Verlet %.3f%%, symplectic Euler %.3f%%\n", drift[0] * 100, drift[1] * 100);
+    CHECK_MSG(drift[0] < 0.005, "velocity Verlet max energy error %.3f%%", drift[0] * 100);
+    CHECK(drift[0] * 3 < drift[1]);
+    std::printf("    LJ max energy error: velocity Verlet %.3f%%, symplectic Euler %.3f%%\n", drift[0] * 100, drift[1] * 100);
 }
 
 TEST(nbody_orbit_energy_verlet_beats_euler) {

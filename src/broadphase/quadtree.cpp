@@ -14,15 +14,33 @@ void Quadtree::buildImpl(ThreadPool&) {
     float size = std::max({bounds_.width(), bounds_.height(), 1e-3f});
     if (!std::isfinite(size)) size = FLT_MAX;  // coordinates near the float limit
     AABB root{bounds_.minX, bounds_.minY, bounds_.minX + size, bounds_.minY + size};
-    nodes_.push_back({root, -1, 0, n_, 0});
+    nodes_.push_back({root, {}, -1, 0, n_, 0});
     // breadth-first so nodes_ can grow while we iterate
     for (size_t i = 0; i < nodes_.size(); i++) split((int)i);
+    // bottom-up (children always follow their parent): exact union of the item
+    // boxes below each node, so one huge particle only loosens its own branch
+    for (int i = (int)nodes_.size() - 1; i >= 0; i--) {
+        Node& node = nodes_[i];
+        AABB b{FLT_MAX, FLT_MAX, -FLT_MAX, -FLT_MAX};
+        auto grow = [&](const AABB& o) {
+            b.minX = std::min(b.minX, o.minX); b.minY = std::min(b.minY, o.minY);
+            b.maxX = std::max(b.maxX, o.maxX); b.maxY = std::max(b.maxY, o.maxY);
+        };
+        if (node.firstChild < 0) {
+            for (int k = node.begin; k < node.end; k++) {
+                int it = items_[k];
+                grow({minX_[it], minY_[it], maxX_[it], maxY_[it]});
+            }
+        } else {
+            for (int ch = 0; ch < 4; ch++) grow(nodes_[node.firstChild + ch].loose);
+        }
+        node.loose = b;  // empty node: inverted box that overlaps nothing
+    }
 }
 
 void Quadtree::split(int idx) {
     Node node = nodes_[idx];
     if (node.end - node.begin <= kLeafSize || node.depth >= kMaxDepth) return;
-    if (node.box.width() <= maxBoxWidth_ && maxBoxWidth_ > 0) return;
     // halve before adding so huge coordinates can't overflow
     float mx = 0.5f * node.box.minX + 0.5f * node.box.maxX, my = 0.5f * node.box.minY + 0.5f * node.box.maxY;
     auto first = items_.begin() + node.begin, last = items_.begin() + node.end;
@@ -35,23 +53,21 @@ void Quadtree::split(int idx) {
     int child = (int)nodes_.size();
     nodes_[idx].firstChild = child;
     int d = node.depth + 1;
-    nodes_.push_back({{r.minX, r.minY, mx, my}, -1, b0, b1, d});
-    nodes_.push_back({{mx, r.minY, r.maxX, my}, -1, b1, b2, d});
-    nodes_.push_back({{r.minX, my, mx, r.maxY}, -1, b2, b3, d});
-    nodes_.push_back({{mx, my, r.maxX, r.maxY}, -1, b3, b4, d});
+    nodes_.push_back({{r.minX, r.minY, mx, my}, {}, -1, b0, b1, d});
+    nodes_.push_back({{mx, r.minY, r.maxX, my}, {}, -1, b1, b2, d});
+    nodes_.push_back({{r.minX, my, mx, r.maxY}, {}, -1, b2, b3, d});
+    nodes_.push_back({{mx, my, r.maxX, r.maxY}, {}, -1, b3, b4, d});
 }
 
 template <class Visit>
 void Quadtree::visit(const AABB& box, Visit&& fn) const {
     if (nodes_.empty()) return;
-    // a box overlapping the query has its centre within maxExtent of the query
-    AABB q{box.minX - maxExtent_, box.minY - maxExtent_, box.maxX + maxExtent_, box.maxY + maxExtent_};
     int stack[4 * kMaxDepth + 8];
     int top = 0;
     stack[top++] = 0;
     while (top > 0) {
         const Node& node = nodes_[stack[--top]];
-        if (node.begin == node.end || !overlaps(node.box, q)) continue;
+        if (node.begin == node.end || !overlaps(node.loose, box)) continue;
         if (node.firstChild < 0) {
             for (int k = node.begin; k < node.end; k++) fn(items_[k]);
         } else {
