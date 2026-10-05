@@ -163,7 +163,8 @@ def main():
     d.caption("Turn on 'Tear links' and pull hard")
     d.click(*TEAR_CHECKBOX)
     d.seconds(0.5)
-    d.drag([(950, 290), (980, 560), (1150, 860)], frames_per_leg=16, hold_end=30)  # grab inside the cloth
+    # a slow, sustained pull spreads the strain so the cloth rips progressively
+    d.drag([(950, 290), (1010, 490), (1100, 740)], frames_per_leg=75, hold_end=40)  # grab inside the cloth
     d.seconds(2.5)
 
     scene("soft")
